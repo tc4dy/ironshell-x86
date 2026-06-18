@@ -22,6 +22,10 @@
 
 ---
 
+## Schematic of the Working and Execution Logic 💻✅
+![Scheme](scheme.png)
+
+---
 ## 📦 Installation
 
 ### 1. Clone the repository
