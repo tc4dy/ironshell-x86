@@ -1,161 +1,129 @@
-NASM        := nasm
-QEMU        := qemu-system-i386
-DD          := dd
+NASM     := nasm
+QEMU     := qemu-system-i386
+DD       := dd
+NDISASM  := ndisasm
 
-DISK_IMAGE  := sx-sandbox.img
-DISK_SIZE   := 1474560
+IMAGE    := sx-sandbox.img
+SECTORS  := 2880
 
-LOADER_BIN  := loader.bin
-STAGE2_BIN  := stage2.bin
-SANDBOX_BIN := sandbox.bin
+LOADER   := loader.bin
+STAGE2   := stage2.bin
+SANDBOX  := sandbox.bin
 
-LOADER_OFFSET  := 0
-STAGE2_OFFSET  := 512
-SANDBOX_OFFSET := 6656
+LOADER_SECTOR   := 0
+STAGE2_SECTOR   := 2
+SANDBOX_SECTOR  := 14
 
-LOADER_SECTORS  := 1
-STAGE2_SECTORS  := 12
-SANDBOX_SECTORS := 8
+LOADER_MAX_BYTES  := 512
+STAGE2_MAX_BYTES  := 6144
+SANDBOX_MAX_BYTES := 4096
 
-QEMU_FLAGS  := -drive format=raw,file=$(DISK_IMAGE) \
-               -m 4M \
-               -cpu 486 \
-               -display curses \
-               -no-reboot \
-               -no-shutdown
+QEMU_BASE := -drive format=raw,file=$(IMAGE) \
+             -m 4M \
+             -cpu 486 \
+             -no-reboot \
+             -no-shutdown
 
-QEMU_DEBUG_FLAGS := -drive format=raw,file=$(DISK_IMAGE) \
-                    -m 4M \
-                    -cpu 486 \
-                    -display curses \
-                    -no-reboot \
-                    -no-shutdown \
-                    -s -S
+QEMU_CURSES := $(QEMU_BASE) -display curses
+QEMU_SDL    := $(QEMU_BASE) -display sdl
+QEMU_DEBUG  := $(QEMU_BASE) -display curses -s -S
 
-QEMU_SDL_FLAGS := -drive format=raw,file=$(DISK_IMAGE) \
-                  -m 4M \
-                  -cpu 486 \
-                  -display sdl \
-                  -no-reboot \
-                  -no-shutdown
+.PHONY: all clean run run-sdl debug disasm check help
 
-.PHONY: all clean run run-sdl debug disasm check-tools help
+all: check $(IMAGE)
+	@printf '\n  Build complete: %s\n  Run: make run\n\n' "$(IMAGE)"
 
-all: check-tools $(DISK_IMAGE)
-	@echo ""
-	@echo "  Build complete: $(DISK_IMAGE)"
-	@echo "  Run with:  make run"
-	@echo ""
+$(IMAGE): $(LOADER) $(STAGE2) $(SANDBOX)
+	@printf '  [IMG] Creating blank disk (%d sectors)...\n' $(SECTORS)
+	@$(DD) if=/dev/zero of=$(IMAGE) bs=512 count=$(SECTORS) status=none
+	@printf '  [IMG] Writing %-8s -> sector %d\n' "$(LOADER)"  $(LOADER_SECTOR)
+	@$(DD) if=$(LOADER)  of=$(IMAGE) bs=512 seek=$(LOADER_SECTOR)  conv=notrunc status=none
+	@printf '  [IMG] Writing %-8s -> sector %d\n' "$(STAGE2)"  $(STAGE2_SECTOR)
+	@$(DD) if=$(STAGE2)  of=$(IMAGE) bs=512 seek=$(STAGE2_SECTOR)  conv=notrunc status=none
+	@printf '  [IMG] Writing %-8s -> sector %d\n' "$(SANDBOX)" $(SANDBOX_SECTOR)
+	@$(DD) if=$(SANDBOX) of=$(IMAGE) bs=512 seek=$(SANDBOX_SECTOR) conv=notrunc status=none
+	@printf '  [OK]  Disk image ready.\n'
 
-$(DISK_IMAGE): $(LOADER_BIN) $(STAGE2_BIN) $(SANDBOX_BIN)
-	@echo "  [IMG]  Creating blank disk image ($(DISK_SIZE) bytes)..."
-	$(DD) if=/dev/zero of=$(DISK_IMAGE) bs=512 count=2880 status=none
-
-	@echo "  [IMG]  Writing loader  -> sector 0"
-	$(DD) if=$(LOADER_BIN)  of=$(DISK_IMAGE) bs=512 seek=0  conv=notrunc status=none
-
-	@echo "  [IMG]  Writing stage2  -> sector 2 (offset $(STAGE2_OFFSET))"
-	$(DD) if=$(STAGE2_BIN)  of=$(DISK_IMAGE) bs=512 seek=2  conv=notrunc status=none
-
-	@echo "  [IMG]  Writing sandbox -> sector 14 (offset $(SANDBOX_OFFSET))"
-	$(DD) if=$(SANDBOX_BIN) of=$(DISK_IMAGE) bs=512 seek=14 conv=notrunc status=none
-
-	@echo "  [OK]   Disk image assembled successfully."
-
-$(LOADER_BIN): loader.asm
-	@echo "  [ASM]  Assembling loader.asm..."
-	$(NASM) -f bin -o $@ $<
+$(LOADER): loader.asm
+	@printf '  [ASM] %s\n' "$<"
+	@$(NASM) -f bin -o $@ $<
 	@SIZE=$$(wc -c < $@); \
-	if [ $$SIZE -ne 512 ]; then \
-		echo "  [ERR]  loader.bin must be exactly 512 bytes (got $$SIZE)"; \
-		exit 1; \
-	fi
-	@echo "  [OK]   loader.bin = 512 bytes (MBR)"
+	  if [ $$SIZE -ne $(LOADER_MAX_BYTES) ]; then \
+	    printf '  [ERR] %s must be exactly %d bytes (got %d)\n' "$@" $(LOADER_MAX_BYTES) $$SIZE; \
+	    rm -f $@; exit 1; \
+	  fi
+	@printf '  [OK]  %-12s %d bytes (MBR)\n' "$@" $(LOADER_MAX_BYTES)
 
-$(STAGE2_BIN): stage2.asm
-	@echo "  [ASM]  Assembling stage2.asm..."
-	$(NASM) -f bin -o $@ $<
+$(STAGE2): stage2.asm
+	@printf '  [ASM] %s\n' "$<"
+	@$(NASM) -f bin -o $@ $<
 	@SIZE=$$(wc -c < $@); \
-	echo "  [OK]   stage2.bin = $$SIZE bytes ($$(( $$SIZE / 512 )) sectors)"
+	  printf '  [OK]  %-12s %d bytes (%d sectors)\n' "$@" $$SIZE $$((SIZE / 512)); \
+	  if [ $$SIZE -gt $(STAGE2_MAX_BYTES) ]; then \
+	    printf '  [ERR] %s exceeds %d byte reservation\n' "$@" $(STAGE2_MAX_BYTES); \
+	    rm -f $@; exit 1; \
+	  fi
+
+$(SANDBOX): sandbox.asm
+	@printf '  [ASM] %s\n' "$<"
+	@$(NASM) -f bin -o $@ $<
 	@SIZE=$$(wc -c < $@); \
-	if [ $$SIZE -gt 6144 ]; then \
-		echo "  [WARN] stage2.bin exceeds 12 sector reservation ($$SIZE bytes)"; \
-	fi
+	  printf '  [OK]  %-12s %d bytes (%d sectors)\n' "$@" $$SIZE $$((SIZE / 512)); \
+	  if [ $$SIZE -gt $(SANDBOX_MAX_BYTES) ]; then \
+	    printf '  [ERR] %s exceeds %d byte reservation\n' "$@" $(SANDBOX_MAX_BYTES); \
+	    rm -f $@; exit 1; \
+	  fi
 
-$(SANDBOX_BIN): sandbox.asm
-	@echo "  [ASM]  Assembling sandbox.asm..."
-	$(NASM) -f bin -o $@ $<
-	@SIZE=$$(wc -c < $@); \
-	echo "  [OK]   sandbox.bin = $$SIZE bytes ($$(( $$SIZE / 512 )) sectors)"
-	@SIZE=$$(wc -c < $@); \
-	if [ $$SIZE -gt 4096 ]; then \
-		echo "  [WARN] sandbox.bin exceeds 8 sector reservation ($$SIZE bytes)"; \
-	fi
+run: $(IMAGE)
+	$(QEMU) $(QEMU_CURSES)
 
-run: $(DISK_IMAGE)
-	@echo "  [RUN]  Launching in QEMU (curses terminal mode)..."
-	$(QEMU) $(QEMU_FLAGS)
+run-sdl: $(IMAGE)
+	$(QEMU) $(QEMU_SDL)
 
-run-sdl: $(DISK_IMAGE)
-	@echo "  [RUN]  Launching in QEMU (SDL window mode)..."
-	$(QEMU) $(QEMU_SDL_FLAGS)
+debug: $(IMAGE)
+	@printf '  [DBG] GDB stub on :1234\n'
+	@printf '        gdb -ex "target remote :1234" -ex "set architecture i8086"\n'
+	@printf '        Then: break *0x7c00   continue\n'
+	$(QEMU) $(QEMU_DEBUG)
 
-debug: $(DISK_IMAGE)
-	@echo "  [DBG]  QEMU paused. Connect GDB with:"
-	@echo "         gdb -ex 'target remote :1234' -ex 'set architecture i8086'"
-	@echo "         Then: break *0x7c00   continue"
-	$(QEMU) $(QEMU_DEBUG_FLAGS)
+disasm: $(LOADER) $(STAGE2) $(SANDBOX)
+	@printf '\n=== LOADER  (0x7C00) ===\n'
+	@$(NDISASM) -b 16 -o 0x7C00 $(LOADER)
+	@printf '\n=== STAGE2  (0x7E00) ===\n'
+	@$(NDISASM) -b 16 -o 0x7E00 $(STAGE2)
+	@printf '\n=== SANDBOX (0x9000) ===\n'
+	@$(NDISASM) -b 16 -o 0x9000 $(SANDBOX)
 
-disasm: $(LOADER_BIN) $(STAGE2_BIN) $(SANDBOX_BIN)
-	@echo ""
-	@echo "=== LOADER DISASSEMBLY (loader.bin) ==="
-	ndisasm -b 16 -o 0x7C00 $(LOADER_BIN)
-	@echo ""
-	@echo "=== STAGE2 DISASSEMBLY (stage2.bin) ==="
-	ndisasm -b 16 -o 0x7E00 $(STAGE2_BIN)
-	@echo ""
-	@echo "=== SANDBOX DISASSEMBLY (sandbox.bin) ==="
-	ndisasm -b 16 -o 0x9000 $(SANDBOX_BIN)
-
-check-tools:
-	@command -v $(NASM) >/dev/null 2>&1 || \
-		{ echo "  [ERR]  nasm not found. Install: sudo apt install nasm"; exit 1; }
-	@command -v $(QEMU) >/dev/null 2>&1 || \
-		{ echo "  [ERR]  qemu-system-i386 not found. Install: sudo apt install qemu-system-x86"; exit 1; }
-	@command -v $(DD) >/dev/null 2>&1 || \
-		{ echo "  [ERR]  dd not found (should be part of coreutils)"; exit 1; }
-	@echo "  [OK]   All required tools found."
+check:
+	@command -v $(NASM)    >/dev/null 2>&1 || { printf '  [ERR] nasm not found\n';            exit 1; }
+	@command -v $(QEMU)    >/dev/null 2>&1 || { printf '  [ERR] qemu-system-i386 not found\n'; exit 1; }
+	@command -v $(DD)      >/dev/null 2>&1 || { printf '  [ERR] dd not found\n';              exit 1; }
+	@printf '  [OK]  Tools: nasm qemu-system-i386 dd\n'
 
 clean:
-	@echo "  [CLN]  Removing build artifacts..."
-	rm -f $(LOADER_BIN) $(STAGE2_BIN) $(SANDBOX_BIN) $(DISK_IMAGE)
-	@echo "  [OK]   Clean complete."
+	@rm -f $(LOADER) $(STAGE2) $(SANDBOX) $(IMAGE)
+	@printf '  [OK]  Clean complete.\n'
 
 help:
-	@echo ""
-	@echo "  SX-SANDBOX Build System"
-	@echo "  ─────────────────────────────────────────"
-	@echo "  make            Build all binaries and disk image"
-	@echo "  make run        Run in QEMU (curses/terminal mode)"
-	@echo "  make run-sdl    Run in QEMU (SDL window)"
-	@echo "  make debug      Run QEMU with GDB stub on :1234"
-	@echo "  make disasm     Disassemble all binaries with ndisasm"
-	@echo "  make clean      Remove all build artifacts"
-	@echo "  make help       Show this message"
-	@echo ""
-	@echo "  Memory Layout:"
-	@echo "  0x7C00  loader.asm   Stage 1 MBR (512 bytes)"
-	@echo "  0x7E00  stage2.asm   Execution engine + shell (12 sectors)"
-	@echo "  0x9000  sandbox.asm  Protection & analysis layer (8 sectors)"
-	@echo "  0xA000  shellcode    Runtime payload injection target"
-	@echo ""
-	@echo "  Shell Commands (inside QEMU):"
-	@echo "  help             Show command reference"
-	@echo "  list             List available payloads"
-	@echo "  sel <n>          Select payload by index"
-	@echo "  run              Execute selected payload"
-	@echo "  sandbox          Re-run sandbox environment checks"
-	@echo "  dump <hex>       Hexdump 32 bytes at address"
-	@echo "  info             Show system memory map"
-	@echo "  clear            Clear execution log"
-	@echo ""
+	@printf '\n  SX-SANDBOX Build System\n'
+	@printf '  ────────────────────────────────────────\n'
+	@printf '  make           Build all and assemble disk image\n'
+	@printf '  make run       Launch in QEMU (curses/terminal)\n'
+	@printf '  make run-sdl   Launch in QEMU (SDL window)\n'
+	@printf '  make debug     QEMU + GDB stub on :1234\n'
+	@printf '  make disasm    Disassemble all binaries (ndisasm)\n'
+	@printf '  make clean     Remove build artifacts\n'
+	@printf '\n  Memory Layout:\n'
+	@printf '  0x7C00  loader.asm   MBR stage1 (512 bytes, sector 0)\n'
+	@printf '  0x7E00  stage2.asm   Shell + engine (12 sectors, sector 2)\n'
+	@printf '  0x9000  sandbox.asm  Protection layer (8 sectors, sector 14)\n'
+	@printf '  0xA000  shellcode    Runtime injection target\n'
+	@printf '\n  Shell Commands:\n'
+	@printf '  run              Execute selected payload\n'
+	@printf '  list             List payload modules\n'
+	@printf '  sel <n>          Select payload by index\n'
+	@printf '  sandbox          Re-run environment checks\n'
+	@printf '  dump <hex>       Hexdump 32 bytes at address\n'
+	@printf '  info             System module info\n'
+	@printf '  clear            Clear log panel\n'
+	@printf '  help             This message\n\n'
