@@ -1,29 +1,47 @@
 BITS 16
 ORG 0x7E00
 
-SANDBOX_ENTRY       equ 0x9000
-SHELLCODE_BASE      equ 0xA000
-MAX_PAYLOAD_COUNT   equ 8
-INPUT_BUFFER_SIZE   equ 128
-HISTORY_DEPTH       equ 8
-HISTORY_ENTRY_SIZE  equ 64
-VGA_TEXT_MEM        equ 0xB800
-SCREEN_ROWS         equ 25
-SCREEN_COLS         equ 80
-LOG_START_ROW       equ 8
-LOG_VISIBLE_ROWS    equ 13
-STATUS_BAR_ROW      equ 24
-TITLE_ROW           equ 0
-COLOR_NORMAL        equ 0x07
-COLOR_BRIGHT        equ 0x0F
-COLOR_SUCCESS       equ 0x0A
-COLOR_ERROR         equ 0x0C
-COLOR_WARN          equ 0x0E
-COLOR_ACCENT        equ 0x0B
-COLOR_DIM           equ 0x08
-COLOR_HIGHLIGHT     equ 0x70
-COLOR_SELECTED      equ 0x2F
-VGA_WIDTH_BYTES     equ 160
+SANDBOX_ENTRY           equ 0x9000
+SHELLCODE_BASE          equ 0xA000
+
+MAX_PAYLOADS            equ 8
+PAYLOAD_NAME_LEN        equ 32
+
+INPUT_BUF_SIZE          equ 128
+
+HIST_DEPTH              equ 8
+HIST_ENTRY_SIZE         equ 64
+
+LOG_LINE_LEN            equ 54
+LOG_MAX_LINES           equ 256
+
+VGA_SEG                 equ 0xB800
+SCREEN_ROWS             equ 25
+SCREEN_COLS             equ 80
+VGA_ROW_BYTES           equ 160
+
+TITLE_ROW               equ 0
+DIVIDER_ROW             equ 2
+SUB_ROW                 equ 3
+DIVIDER2_ROW            equ 4
+PANEL_START_ROW         equ 6
+PANEL_END_ROW           equ 22
+PROMPT_ROW              equ 23
+STATUS_ROW              equ 24
+
+LEFT_PANEL_COLS         equ 24
+RIGHT_PANEL_START       equ 25
+
+COL_NORMAL              equ 0x07
+COL_BRIGHT              equ 0x0F
+COL_SUCCESS             equ 0x0A
+COL_ERROR               equ 0x0C
+COL_WARN                equ 0x0E
+COL_ACCENT              equ 0x0B
+COL_DIM                 equ 0x08
+COL_SELECTED            equ 0x2F
+COL_TITLE               equ 0x4F
+COL_STATUS              equ 0x30
 
 stage2_main:
     xor     ax, ax
@@ -36,216 +54,233 @@ stage2_main:
 
     mov     [engine_drive], dl
 
-    call    _init_payload_table
-    call    _ui_full_redraw
-    call    _run_sandbox_checks
-    call    _shell_loop
+    call    init_payloads
+    call    ui_full_redraw
+    call    run_env_checks
+    call    shell_loop
 
     cli
     hlt
     jmp     $
 
-_init_payload_table:
+init_payloads:
     pusha
-    mov     di, payload_table
-    mov     cx, MAX_PAYLOAD_COUNT * 32
+    mov     di, payload_names
+    mov     cx, MAX_PAYLOADS * PAYLOAD_NAME_LEN
     xor     al, al
     rep     stosb
 
     mov     word [payload_count], 0
-    mov     word [selected_payload], 0
-    mov     word [log_scroll], 0
-    mov     word [history_head], 0
-    mov     word [history_count], 0
+    mov     word [selected_idx], 0
+    mov     word [log_line_count], 0
+    mov     word [log_scroll_offset], 0
+    mov     word [hist_head], 0
+    mov     word [hist_count], 0
+    mov     word [hist_cursor], 0
+    mov     word [partial_col], 0
 
-    mov     si, str_payload_msgbox
-    mov     di, payload_table + 0 * 32
-    call    _strcpy_16
+    mov     si, str_pl_msgbox
+    mov     di, payload_names + 0 * PAYLOAD_NAME_LEN
+    call    strcpy_bounded
     mov     byte [payload_flags + 0], 0x01
 
-    mov     si, str_payload_memwalk
-    mov     di, payload_table + 1 * 32
-    call    _strcpy_16
+    mov     si, str_pl_memwalk
+    mov     di, payload_names + 1 * PAYLOAD_NAME_LEN
+    call    strcpy_bounded
     mov     byte [payload_flags + 1], 0x01
 
-    mov     si, str_payload_portprobe
-    mov     di, payload_table + 2 * 32
-    call    _strcpy_16
+    mov     si, str_pl_portprobe
+    mov     di, payload_names + 2 * PAYLOAD_NAME_LEN
+    call    strcpy_bounded
     mov     byte [payload_flags + 2], 0x01
 
-    mov     si, str_payload_stacksmash
-    mov     di, payload_table + 3 * 32
-    call    _strcpy_16
+    mov     si, str_pl_stacksmash
+    mov     di, payload_names + 3 * PAYLOAD_NAME_LEN
+    call    strcpy_bounded
     mov     byte [payload_flags + 3], 0x02
 
-    mov     si, str_payload_nxprobe
-    mov     di, payload_table + 4 * 32
-    call    _strcpy_16
+    mov     si, str_pl_nxprobe
+    mov     di, payload_names + 4 * PAYLOAD_NAME_LEN
+    call    strcpy_bounded
     mov     byte [payload_flags + 4], 0x01
 
-    mov     si, str_payload_cpuinfo
-    mov     di, payload_table + 5 * 32
-    call    _strcpy_16
+    mov     si, str_pl_cpuinfo
+    mov     di, payload_names + 5 * PAYLOAD_NAME_LEN
+    call    strcpy_bounded
     mov     byte [payload_flags + 5], 0x01
 
-    mov     word [payload_count], 6
+    mov     si, str_pl_ivtdump
+    mov     di, payload_names + 6 * PAYLOAD_NAME_LEN
+    call    strcpy_bounded
+    mov     byte [payload_flags + 6], 0x01
+
+    mov     word [payload_count], 7
     popa
     ret
 
-_run_sandbox_checks:
-    call    _log_separator
-    mov     si, str_sandbox_init
-    call    _log_line_accent
-
-    call    _check_nx_bit
-    call    _check_smep
-    call    _check_cpuid_features
-    call    _check_memory_size
-    call    _check_a20
-
-    call    _log_separator
+run_env_checks:
+    call    log_separator
+    mov     si, str_env_start
+    call    log_accent
+    call    check_nx
+    call    check_smep
+    call    check_cpuid
+    call    check_ram
+    call    check_a20
+    call    log_separator
     ret
 
-_check_nx_bit:
+check_nx:
     pusha
     mov     eax, 0x80000001
     cpuid
     test    edx, (1 << 20)
-    jz      .no_nx
-    mov     si, str_nx_enabled
-    mov     bl, COLOR_WARN
-    call    _log_line_colored
+    jz      .off
+    mov     si, str_nx_on
+    mov     bl, COL_WARN
+    call    log_colored
     mov     byte [nx_active], 1
-    jmp     .done
-.no_nx:
-    mov     si, str_nx_disabled
-    mov     bl, COLOR_SUCCESS
-    call    _log_line_colored
+    popa
+    ret
+.off:
+    mov     si, str_nx_off
+    mov     bl, COL_SUCCESS
+    call    log_colored
     mov     byte [nx_active], 0
-.done:
     popa
     ret
 
-_check_smep:
+check_smep:
     pusha
     mov     eax, 7
     xor     ecx, ecx
     cpuid
     test    ebx, (1 << 7)
-    jz      .no_smep
+    jz      .off
     mov     si, str_smep_on
-    mov     bl, COLOR_WARN
-    call    _log_line_colored
+    mov     bl, COL_WARN
+    call    log_colored
     mov     byte [smep_active], 1
-    jmp     .done
-.no_smep:
+    popa
+    ret
+.off:
     mov     si, str_smep_off
-    mov     bl, COLOR_SUCCESS
-    call    _log_line_colored
+    mov     bl, COL_SUCCESS
+    call    log_colored
     mov     byte [smep_active], 0
-.done:
     popa
     ret
 
-_check_cpuid_features:
+check_cpuid:
     pusha
-    mov     eax, 1
-    cpuid
-    mov     [cpuid_edx_feat], edx
-    mov     [cpuid_ecx_feat], ecx
-
-    mov     si, str_cpuid_vendor
-    mov     bl, COLOR_ACCENT
-    call    _log_line_colored
-
     push    es
     xor     ax, ax
     mov     es, ax
+
     mov     eax, 0
     cpuid
-    mov     [cpu_vendor_buf],     ebx
-    mov     [cpu_vendor_buf + 4], edx
-    mov     [cpu_vendor_buf + 8], ecx
-    mov     byte [cpu_vendor_buf + 12], 0
+    mov     [cpu_vendor],     ebx
+    mov     [cpu_vendor + 4], edx
+    mov     [cpu_vendor + 8], ecx
+    mov     byte [cpu_vendor + 12], 0
+
+    mov     eax, 1
+    cpuid
+    mov     [cpuid_edx], edx
+    mov     [cpuid_ecx], ecx
+
     pop     es
 
-    mov     si, str_prefix_vendor
-    call    _log_partial
-    mov     si, cpu_vendor_buf
-    mov     bl, COLOR_BRIGHT
-    call    _log_line_colored
+    mov     si, str_cpuid_hdr
+    mov     bl, COL_ACCENT
+    call    log_colored
+
+    mov     si, str_vendor_pfx
+    call    log_partial
+    mov     si, cpu_vendor
+    mov     bl, COL_BRIGHT
+    call    log_colored
+
     popa
     ret
 
-_check_memory_size:
+check_ram:
     pusha
     int     0x12
     mov     [conv_mem_kb], ax
-    mov     si, str_prefix_memory
-    call    _log_partial
+    mov     si, str_ram_pfx
+    call    log_partial
     mov     ax, [conv_mem_kb]
-    call    _log_decimal_kb
+    call    log_decimal
+    mov     si, str_kb
+    mov     bl, COL_DIM
+    call    log_colored
     popa
     ret
 
-_check_a20:
+check_a20:
     pusha
-    call    _test_a20_gate
-    jc      .enabled
+    call    test_a20
+    jc      .on
     mov     si, str_a20_off
-    mov     bl, COLOR_ERROR
-    call    _log_line_colored
-    jmp     .done
-.enabled:
+    mov     bl, COL_ERROR
+    call    log_colored
+    popa
+    ret
+.on:
     mov     si, str_a20_on
-    mov     bl, COLOR_SUCCESS
-    call    _log_line_colored
-.done:
+    mov     bl, COL_SUCCESS
+    call    log_colored
     popa
     ret
 
-_test_a20_gate:
+test_a20:
     push    es
     push    di
     push    si
+    push    ax
+
     mov     ax, 0xFFFF
     mov     es, ax
     mov     di, 0x0510
     mov     si, 0x0500
+
     mov     al, [si]
     push    ax
     mov     al, [es:di]
     push    ax
+
     mov     byte [si],    0x00
     mov     byte [es:di], 0xFF
     cmp     byte [si], 0xFF
+
     pop     ax
     mov     [es:di], al
     pop     ax
     mov     [si], al
+
+    pop     ax
     pop     si
     pop     di
     pop     es
-    jne     .a20_on
-    clc
-    ret
-.a20_on:
+    je      .wrap
     stc
     ret
+.wrap:
+    clc
+    ret
 
-_shell_loop:
-    call    _ui_draw_prompt
+shell_loop:
+    call    ui_draw_prompt
 .main:
-    mov     di, input_buffer
-    mov     word [input_len], 0
-    call    _readline
-    call    _dispatch_command
+    call    readline
+    call    dispatch_cmd
     jmp     .main
 
-_readline:
+readline:
     pusha
     xor     cx, cx
-    mov     di, input_buffer
+    mov     di, input_buf
 
 .key:
     xor     ah, ah
@@ -253,22 +288,20 @@ _readline:
 
     cmp     al, 0x0D
     je      .enter
-
     cmp     al, 0x08
     je      .backspace
+    cmp     al, 0x00
+    je      .special
 
-    cmp     al, 0
-    je      .special_key
-
-    cmp     cx, INPUT_BUFFER_SIZE - 1
+    cmp     cx, INPUT_BUF_SIZE - 1
     jge     .key
 
     stosb
     inc     cx
-    call    _echo_char
+    call    echo_char
     jmp     .key
 
-.special_key:
+.special:
     cmp     ah, 0x48
     je      .hist_up
     cmp     ah, 0x50
@@ -276,11 +309,11 @@ _readline:
     jmp     .key
 
 .hist_up:
-    call    _history_prev
+    call    hist_prev
     jmp     .key
 
 .hist_down:
-    call    _history_next
+    call    hist_next
     jmp     .key
 
 .backspace:
@@ -288,319 +321,303 @@ _readline:
     jz      .key
     dec     di
     dec     cx
-    call    _echo_backspace
+    call    echo_backspace
     jmp     .key
 
 .enter:
     mov     byte [di], 0
     mov     [input_len], cx
-    call    _newline_echo
-    cmp     cx, 0
-    jz      .skip_history
-    call    _history_push
-.skip_history:
+    call    echo_newline
+    test    cx, cx
+    jz      .done
+    call    hist_push
+.done:
     popa
     ret
 
-_dispatch_command:
+dispatch_cmd:
     pusha
-    mov     si, input_buffer
+    mov     si, input_buf
     cmp     byte [si], 0
     je      .done
 
     mov     di, cmd_run
-    call    _strcmp_ci
-    jz      .do_run
+    call    strcmp_ci
+    jz      .run
 
     mov     di, cmd_list
-    call    _strcmp_ci
-    jz      .do_list
+    call    strcmp_ci
+    jz      .list
 
     mov     di, cmd_info
-    call    _strcmp_ci
-    jz      .do_info
+    call    strcmp_ci
+    jz      .info
 
     mov     di, cmd_clear
-    call    _strcmp_ci
-    jz      .do_clear
+    call    strcmp_ci
+    jz      .clear
 
     mov     di, cmd_help
-    call    _strcmp_ci
-    jz      .do_help
+    call    strcmp_ci
+    jz      .help
 
     mov     di, cmd_sel
-    call    _strcmp_prefix
-    jz      .do_select
+    call    strcmp_pfx
+    jz      .select
 
     mov     di, cmd_sandbox
-    call    _strcmp_ci
-    jz      .do_sandbox
+    call    strcmp_ci
+    jz      .sandbox
 
     mov     di, cmd_dump
-    call    _strcmp_prefix
-    jz      .do_dump
+    call    strcmp_pfx
+    jz      .dump
 
-    mov     si, str_unknown_cmd
-    call    _log_line_error
+    mov     si, str_err_unknown
+    call    log_error
     jmp     .done
 
-.do_run:
-    call    _cmd_run_payload
-    jmp     .done
-
-.do_list:
-    call    _cmd_list_payloads
-    jmp     .done
-
-.do_info:
-    call    _cmd_show_info
-    jmp     .done
-
-.do_clear:
-    call    _cmd_clear_log
-    jmp     .done
-
-.do_help:
-    call    _cmd_show_help
-    jmp     .done
-
-.do_select:
-    call    _cmd_select_payload
-    jmp     .done
-
-.do_sandbox:
-    call    _run_sandbox_checks
-    jmp     .done
-
-.do_dump:
-    call    _cmd_hexdump
-    jmp     .done
+.run:       call cmd_run_payload   ; jmp .done intentional fallthrough
+            jmp .done
+.list:      call cmd_list_payloads
+            jmp .done
+.info:      call cmd_show_info
+            jmp .done
+.clear:     call cmd_clear_log
+            jmp .done
+.help:      call cmd_show_help
+            jmp .done
+.select:    call cmd_select
+            jmp .done
+.sandbox:   call run_env_checks
+            jmp .done
+.dump:      call cmd_hexdump
+            jmp .done
 
 .done:
-    call    _ui_draw_prompt
+    call    ui_draw_prompt
     popa
     ret
 
-_cmd_run_payload:
+cmd_run_payload:
     pusha
-    mov     ax, [selected_payload]
+    mov     ax, [selected_idx]
     cmp     ax, [payload_count]
     jge     .invalid
 
-    call    _log_separator
+    call    log_separator
 
-    mov     si, str_exec_start
-    call    _log_line_accent
+    mov     si, str_exec_dispatch
+    call    log_accent
 
     push    ax
-    mov     si, str_prefix_exec
-    call    _log_partial
-
+    mov     si, str_pfx_target
+    call    log_partial
     pop     ax
     push    ax
-    mov     bx, 32
+
+    mov     bx, PAYLOAD_NAME_LEN
     mul     bx
-    mov     si, ax
-    add     si, payload_table
-    mov     bl, COLOR_BRIGHT
-    call    _log_line_colored
+    mov     si, payload_names
+    add     si, ax
+    mov     bl, COL_BRIGHT
+    call    log_colored
+
+    mov     si, str_sandbox_active
+    mov     bl, COL_DIM
+    call    log_colored
 
     pop     ax
-    push    ax
-
-    mov     bl, COLOR_DIM
-    mov     si, str_sandbox_check
-    call    _log_line_colored
-
-    pop     ax
-    call    _dispatch_payload
-
-    call    _log_separator
+    call    exec_payload
+    call    log_separator
     popa
     ret
 
 .invalid:
-    mov     si, str_no_payload
-    call    _log_line_error
+    mov     si, str_err_no_payload
+    call    log_error
     popa
     ret
 
-_dispatch_payload:
+exec_payload:
     cmp     ax, 0
-    je      _payload_msgbox
+    je      payload_msgbox
     cmp     ax, 1
-    je      _payload_memwalk
+    je      payload_memwalk
     cmp     ax, 2
-    je      _payload_portprobe
+    je      payload_portprobe
     cmp     ax, 3
-    je      _payload_stacksmash
+    je      payload_stacksmash
     cmp     ax, 4
-    je      _payload_nxprobe
+    je      payload_nxprobe
     cmp     ax, 5
-    je      _payload_cpuinfo
+    je      payload_cpuinfo
+    cmp     ax, 6
+    je      payload_ivtdump
     ret
 
-_payload_msgbox:
+payload_msgbox:
     pusha
-    mov     si, str_pl_msgbox_1
-    mov     bl, COLOR_SUCCESS
-    call    _log_line_colored
-    mov     si, str_pl_msgbox_2
-    mov     bl, COLOR_NORMAL
-    call    _log_line_colored
-
     push    es
     xor     ax, ax
     mov     es, ax
-    mov     word [es:SHELLCODE_BASE],     0xB8C0
+
+    mov     si, str_msgbox_hdr
+    mov     bl, COL_SUCCESS
+    call    log_colored
+
+    mov     word [es:SHELLCODE_BASE + 0], 0xB8C0
     mov     word [es:SHELLCODE_BASE + 2], 0x07C0
     mov     word [es:SHELLCODE_BASE + 4], 0x90C3
-    pop     es
 
-    mov     si, str_pl_injected
-    mov     bl, COLOR_ACCENT
-    call    _log_line_colored
+    mov     si, str_injected
+    mov     bl, COL_ACCENT
+    call    log_colored
 
     call    SHELLCODE_BASE
 
-    mov     si, str_pl_returned
-    mov     bl, COLOR_SUCCESS
-    call    _log_line_colored
-    popa
-    ret
-
-_payload_memwalk:
-    pusha
-    mov     si, str_pl_memwalk_1
-    mov     bl, COLOR_SUCCESS
-    call    _log_line_colored
-
-    push    es
-    xor     ax, ax
-    mov     es, ax
-
-    mov     cx, 8
-    mov     bx, 0x0400
-
-.walk_loop:
-    mov     ax, [es:bx]
-    push    cx
-    push    bx
-
-    mov     si, str_prefix_addr
-    call    _log_partial
-    mov     ax, bx
-    call    _log_hex_word
-    mov     si, str_colon_space
-    call    _log_partial
-
-    pop     bx
-    mov     ax, [es:bx]
-    call    _log_hex_word_newline
-
-    add     bx, 2
-    pop     cx
-    loop    .walk_loop
+    mov     si, str_returned
+    mov     bl, COL_SUCCESS
+    call    log_colored
 
     pop     es
     popa
     ret
 
-_payload_portprobe:
+payload_memwalk:
     pusha
-    mov     si, str_pl_port_1
-    mov     bl, COLOR_SUCCESS
-    call    _log_line_colored
+    push    es
+    xor     ax, ax
+    mov     es, ax
+
+    mov     si, str_memwalk_hdr
+    mov     bl, COL_SUCCESS
+    call    log_colored
+
+    mov     cx, 16
+    mov     bx, 0x0400
+
+.row:
+    push    cx
+    push    bx
+
+    mov     si, str_pfx_addr
+    call    log_partial
+    mov     ax, bx
+    call    emit_hex_word
+
+    mov     si, str_colon_sp
+    call    log_partial
+
+    pop     bx
+    push    bx
+    mov     ax, [es:bx]
+    call    emit_hex_word_nl
+
+    add     bx, 2
+    pop     bx
+    add     bx, 2
+    pop     cx
+    loop    .row
+
+    pop     es
+    popa
+    ret
+
+payload_portprobe:
+    pusha
+
+    mov     si, str_port_hdr
+    mov     bl, COL_SUCCESS
+    call    log_colored
 
     mov     cx, 8
     mov     dx, 0x03F8
 
-.probe_loop:
+.row:
     push    cx
     push    dx
 
     in      al, dx
     mov     bl, al
 
-    mov     si, str_prefix_port
-    call    _log_partial
+    mov     si, str_pfx_port
+    call    log_partial
     pop     dx
     push    dx
     mov     ax, dx
-    call    _log_hex_word
+    call    emit_hex_word
     mov     si, str_arrow
-    call    _log_partial
+    call    log_partial
     mov     al, bl
-    call    _log_hex_byte_newline
+    call    emit_hex_byte_nl
 
     pop     dx
     add     dx, 8
     pop     cx
-    loop    .probe_loop
+    loop    .row
 
     popa
     ret
 
-_payload_stacksmash:
+payload_stacksmash:
     pusha
-    mov     si, str_pl_stack_1
-    mov     bl, COLOR_WARN
-    call    _log_line_colored
+
+    mov     si, str_stack_hdr
+    mov     bl, COL_WARN
+    call    log_colored
 
     mov     ax, ss
     push    ax
-    mov     si, str_prefix_ss
-    call    _log_partial
+    mov     si, str_pfx_ss
+    call    log_partial
     pop     ax
-    call    _log_hex_word_newline
+    call    emit_hex_word_nl
 
     mov     ax, sp
     push    ax
-    mov     si, str_prefix_sp
-    call    _log_partial
+    mov     si, str_pfx_sp
+    call    log_partial
     pop     ax
-    call    _log_hex_word_newline
+    call    emit_hex_word_nl
 
-    mov     si, str_pl_stack_2
-    mov     bl, COLOR_WARN
-    call    _log_line_colored
+    mov     si, str_canary_write
+    mov     bl, COL_WARN
+    call    log_colored
 
     mov     cx, 4
-.probe_stack:
+.push_canary:
     push    word 0xDEAD
-    loop    .probe_stack
+    loop    .push_canary
 
     mov     cx, 4
-.check_stack:
+.check_canary:
     pop     ax
     cmp     ax, 0xDEAD
     jne     .corrupt
-    loop    .check_stack
+    loop    .check_canary
 
-    mov     si, str_pl_stack_ok
-    mov     bl, COLOR_SUCCESS
-    call    _log_line_colored
+    mov     si, str_stack_ok
+    mov     bl, COL_SUCCESS
+    call    log_colored
     popa
     ret
 
 .corrupt:
-    mov     si, str_pl_stack_corrupt
-    call    _log_line_error
+    mov     si, str_stack_corrupt
+    call    log_error
     popa
     ret
 
-_payload_nxprobe:
+payload_nxprobe:
     pusha
-    mov     si, str_pl_nx_1
-    mov     bl, COLOR_SUCCESS
-    call    _log_line_colored
+
+    mov     si, str_nx_hdr
+    mov     bl, COL_SUCCESS
+    call    log_colored
 
     cmp     byte [nx_active], 1
-    je      .nx_on
-
-    mov     si, str_pl_nx_exec
-    mov     bl, COLOR_SUCCESS
-    call    _log_line_colored
+    je      .nx_present
 
     push    es
     xor     ax, ax
@@ -608,26 +625,31 @@ _payload_nxprobe:
     mov     byte [es:SHELLCODE_BASE], 0xC3
     pop     es
 
+    mov     si, str_nx_exec
+    mov     bl, COL_SUCCESS
+    call    log_colored
+
     call    SHELLCODE_BASE
 
-    mov     si, str_pl_nx_done
-    mov     bl, COLOR_SUCCESS
-    call    _log_line_colored
+    mov     si, str_nx_done
+    mov     bl, COL_SUCCESS
+    call    log_colored
     popa
     ret
 
-.nx_on:
-    mov     si, str_pl_nx_blocked
-    mov     bl, COLOR_WARN
-    call    _log_line_colored
+.nx_present:
+    mov     si, str_nx_blocked
+    mov     bl, COL_WARN
+    call    log_colored
     popa
     ret
 
-_payload_cpuinfo:
+payload_cpuinfo:
     pusha
-    mov     si, str_pl_cpu_1
-    mov     bl, COLOR_SUCCESS
-    call    _log_line_colored
+
+    mov     si, str_cpu_hdr
+    mov     bl, COL_SUCCESS
+    call    log_colored
 
     mov     eax, 0x80000000
     cpuid
@@ -656,54 +678,96 @@ _payload_cpuinfo:
     mov     [cpu_brand + 44], edx
     mov     byte [cpu_brand + 48], 0
 
-    mov     si, str_prefix_brand
-    call    _log_partial
+    mov     si, str_pfx_brand
+    call    log_partial
     mov     si, cpu_brand
-    mov     bl, COLOR_BRIGHT
-    call    _log_line_colored
-    jmp     .feat
+    mov     bl, COL_BRIGHT
+    call    log_colored
+    jmp     .features
 
 .no_brand:
     mov     si, str_no_brand
-    mov     bl, COLOR_DIM
-    call    _log_line_colored
+    mov     bl, COL_DIM
+    call    log_colored
 
-.feat:
+.features:
     mov     eax, 1
     cpuid
-    mov     si, str_prefix_stepping
-    call    _log_partial
-    and     eax, 0xF
-    call    _log_decimal_newline
+    mov     si, str_pfx_step
+    call    log_partial
+    and     eax, 0x0F
+    call    log_decimal
+    call    emit_newline
 
-    mov     edx, [cpuid_edx_feat]
+    mov     edx, [cpuid_edx]
     test    edx, (1 << 25)
     jz      .no_sse
     mov     si, str_feat_sse
-    mov     bl, COLOR_SUCCESS
-    call    _log_line_colored
+    mov     bl, COL_SUCCESS
+    call    log_colored
 .no_sse:
     test    edx, (1 << 26)
     jz      .no_sse2
     mov     si, str_feat_sse2
-    mov     bl, COLOR_SUCCESS
-    call    _log_line_colored
+    mov     bl, COL_SUCCESS
+    call    log_colored
 .no_sse2:
-    mov     ecx, [cpuid_ecx_feat]
+    mov     ecx, [cpuid_ecx]
     test    ecx, (1 << 28)
     jz      .no_avx
     mov     si, str_feat_avx
-    mov     bl, COLOR_SUCCESS
-    call    _log_line_colored
+    mov     bl, COL_SUCCESS
+    call    log_colored
 .no_avx:
     popa
     ret
 
-_cmd_list_payloads:
+payload_ivtdump:
     pusha
-    call    _log_separator
-    mov     si, str_list_header
-    call    _log_line_accent
+    push    es
+    xor     ax, ax
+    mov     es, ax
+
+    mov     si, str_ivt_hdr
+    mov     bl, COL_SUCCESS
+    call    log_colored
+
+    xor     bx, bx
+    mov     cx, 16
+
+.row:
+    push    cx
+    push    bx
+
+    mov     si, str_pfx_vec
+    call    log_partial
+    mov     ax, bx
+    call    emit_hex_byte_inline
+
+    mov     si, str_colon_sp
+    call    log_partial
+
+    mov     ax, [es:bx]
+    call    emit_hex_word
+    mov     si, str_colon_sp
+    call    log_partial
+    mov     ax, [es:bx+2]
+    call    emit_hex_word_nl
+
+    pop     bx
+    add     bx, 4
+    pop     cx
+    loop    .row
+
+    pop     es
+    popa
+    ret
+
+cmd_list_payloads:
+    pusha
+    call    log_separator
+    mov     si, str_list_hdr
+    call    log_accent
 
     xor     cx, cx
 .loop:
@@ -711,153 +775,152 @@ _cmd_list_payloads:
     jge     .done
 
     push    cx
-    cmp     cx, [selected_payload]
-    jne     .not_selected
+    cmp     cx, [selected_idx]
+    jne     .not_sel
 
-    mov     si, str_list_sel_prefix
-    mov     bl, COLOR_SELECTED
-    call    _log_partial_colored
-    jmp     .print_name
+    mov     si, str_sel_marker
+    mov     bl, COL_SELECTED
+    call    log_partial_col
+    jmp     .name
 
-.not_selected:
-    mov     si, str_list_prefix
-    mov     bl, COLOR_DIM
-    call    _log_partial_colored
+.not_sel:
+    mov     si, str_unsel_marker
+    mov     bl, COL_DIM
+    call    log_partial_col
 
-.print_name:
+.name:
     pop     cx
     push    cx
 
     mov     ax, cx
-    mov     bx, 32
+    mov     bx, PAYLOAD_NAME_LEN
     mul     bx
-    mov     si, ax
-    add     si, payload_table
+    mov     si, payload_names
+    add     si, ax
 
-    mov     bl, COLOR_NORMAL
+    mov     bl, COL_NORMAL
     cmp     byte [payload_flags + cx], 0x02
-    jne     .safe_flag
-    mov     bl, COLOR_WARN
+    jne     .safe
+    mov     bl, COL_WARN
 
-.safe_flag:
-    call    _log_line_colored
+.safe:
+    call    log_colored
 
     pop     cx
     inc     cx
     jmp     .loop
 
 .done:
-    call    _log_separator
+    call    log_separator
     popa
     ret
 
-_cmd_show_info:
+cmd_show_info:
     pusha
-    call    _log_separator
-    mov     si, str_info_header
-    call    _log_line_accent
-
+    call    log_separator
+    mov     si, str_info_hdr
+    call    log_accent
     mov     si, str_info_1
-    mov     bl, COLOR_NORMAL
-    call    _log_line_colored
+    mov     bl, COL_NORMAL
+    call    log_colored
     mov     si, str_info_2
-    call    _log_line_colored
+    call    log_colored
     mov     si, str_info_3
-    call    _log_line_colored
+    call    log_colored
     mov     si, str_info_4
-    call    _log_line_colored
-
-    call    _log_separator
+    call    log_colored
+    call    log_separator
     popa
     ret
 
-_cmd_clear_log:
+cmd_clear_log:
     pusha
     mov     word [log_line_count], 0
-    mov     word [log_scroll], 0
-    call    _ui_redraw_log
+    mov     word [log_scroll_offset], 0
+    call    ui_redraw_log
     popa
     ret
 
-_cmd_show_help:
+cmd_show_help:
     pusha
-    call    _log_separator
-    mov     si, str_help_header
-    call    _log_line_accent
+    call    log_separator
+    mov     si, str_help_hdr
+    call    log_accent
     mov     si, str_help_run
-    mov     bl, COLOR_NORMAL
-    call    _log_line_colored
+    mov     bl, COL_NORMAL
+    call    log_colored
     mov     si, str_help_list
-    call    _log_line_colored
+    call    log_colored
     mov     si, str_help_sel
-    call    _log_line_colored
+    call    log_colored
     mov     si, str_help_sandbox
-    call    _log_line_colored
+    call    log_colored
     mov     si, str_help_dump
-    call    _log_line_colored
+    call    log_colored
     mov     si, str_help_info
-    call    _log_line_colored
+    call    log_colored
     mov     si, str_help_clear
-    call    _log_line_colored
-    call    _log_separator
+    call    log_colored
+    call    log_separator
     popa
     ret
 
-_cmd_select_payload:
+cmd_select:
     pusha
-    mov     si, input_buffer + 4
-    call    _skip_spaces
-    call    _parse_decimal
+    mov     si, input_buf + 4
+    call    skip_spaces
+    call    parse_decimal
     jc      .bad
     cmp     ax, [payload_count]
     jge     .oob
-    mov     [selected_payload], ax
+    mov     [selected_idx], ax
+    call    ui_redraw_payload_list
     mov     si, str_sel_ok
-    call    _log_line_accent
+    call    log_accent
     popa
     ret
 .bad:
-    mov     si, str_sel_bad
-    call    _log_line_error
+    mov     si, str_err_bad_idx
+    call    log_error
     popa
     ret
 .oob:
-    mov     si, str_sel_oob
-    call    _log_line_error
+    mov     si, str_err_oob
+    call    log_error
     popa
     ret
 
-_cmd_hexdump:
+cmd_hexdump:
     pusha
-    mov     si, input_buffer + 5
-    call    _skip_spaces
-    call    _parse_hex_word
+    mov     si, input_buf + 5
+    call    skip_spaces
+    call    parse_hex_word
     jc      .bad
-    mov     bx, ax
 
     push    es
-    xor     ax, ax
-    mov     es, ax
+    xor     bx, bx
+    mov     es, bx
+    mov     bx, ax
 
     mov     cx, 4
+
 .row:
     push    cx
     push    bx
 
     mov     ax, bx
-    call    _log_hex_word
-    mov     si, str_colon_space
-    call    _log_partial
+    call    emit_hex_word
+    mov     si, str_colon_sp
+    call    log_partial
 
     mov     cx, 8
 .byte_loop:
     mov     al, [es:bx]
-    call    _log_hex_byte_space
+    call    emit_hex_byte_sp
     inc     bx
     loop    .byte_loop
 
-    call    _newline_log
-
+    call    emit_newline
     pop     bx
     add     bx, 8
     pop     cx
@@ -868,23 +931,23 @@ _cmd_hexdump:
     ret
 
 .bad:
-    mov     si, str_dump_bad
-    call    _log_line_error
+    mov     si, str_err_bad_addr
+    call    log_error
     popa
     ret
 
-_ui_full_redraw:
-    call    _ui_draw_static_frame
-    call    _ui_redraw_payload_list
-    call    _ui_redraw_log
-    call    _ui_draw_prompt
-    call    _ui_draw_statusbar
+ui_full_redraw:
+    call    ui_draw_frame
+    call    ui_redraw_payload_list
+    call    ui_redraw_log
+    call    ui_draw_statusbar
+    call    ui_draw_prompt
     ret
 
-_ui_draw_static_frame:
+ui_draw_frame:
     pusha
     push    es
-    mov     ax, VGA_TEXT_MEM
+    mov     ax, VGA_SEG
     mov     es, ax
 
     xor     di, di
@@ -892,230 +955,248 @@ _ui_draw_static_frame:
     mov     ax, (0x01 << 8) | 0x20
     rep     stosw
 
-    mov     di, TITLE_ROW * VGA_WIDTH_BYTES
+    mov     di, TITLE_ROW * VGA_ROW_BYTES
     mov     cx, SCREEN_COLS
     mov     ax, (0x40 << 8) | 0x20
     rep     stosw
+    mov     di, TITLE_ROW * VGA_ROW_BYTES
+    mov     si, str_title
+    mov     ah, COL_TITLE
+    call    vga_puts
 
-    mov     di, TITLE_ROW * VGA_WIDTH_BYTES
-    mov     ah, 0x4F
-    mov     si, str_title_bar
-    call    _vga_str_es
-
-    mov     di, (TITLE_ROW * 80 + 60) * 2
-    mov     si, str_title_right
+    mov     di, (TITLE_ROW * SCREEN_COLS + 60) * 2
+    mov     si, str_build
     mov     ah, 0x4B
-    call    _vga_str_es
+    call    vga_puts
 
-    mov     di, 2 * VGA_WIDTH_BYTES
+    mov     di, DIVIDER_ROW * VGA_ROW_BYTES
     mov     cx, SCREEN_COLS
-    mov     ax, (0x08 << 8) | 0xCD
+    mov     ax, (COL_DIM << 8) | 0xCD
     rep     stosw
-
-    mov     di, 2 * VGA_WIDTH_BYTES
-    mov     ax, (0x08 << 8) | 0xC9
+    mov     di, DIVIDER_ROW * VGA_ROW_BYTES
+    mov     ax, (COL_DIM << 8) | 0xC9
     stosw
-    mov     di, (2 * 80 + 79) * 2
-    mov     ax, (0x08 << 8) | 0xBB
+    mov     di, (DIVIDER_ROW * SCREEN_COLS + 79) * 2
+    mov     ax, (COL_DIM << 8) | 0xBB
     stosw
 
-    mov     di, 3 * VGA_WIDTH_BYTES
+    mov     di, SUB_ROW * VGA_ROW_BYTES
     mov     cx, SCREEN_COLS
-    mov     ax, (0x08 << 8) | 0x20
+    mov     ax, (COL_DIM << 8) | 0x20
     rep     stosw
-
-    mov     di, (3 * 80 + 1) * 2
-    mov     ah, 0x0B
+    mov     di, (SUB_ROW * SCREEN_COLS + 1) * 2
     mov     si, str_subtitle
-    call    _vga_str_es
+    mov     ah, COL_ACCENT
+    call    vga_puts
 
-    mov     di, 4 * VGA_WIDTH_BYTES
+    mov     di, DIVIDER2_ROW * VGA_ROW_BYTES
     mov     cx, SCREEN_COLS
-    mov     ax, (0x08 << 8) | 0xC4
+    mov     ax, (COL_DIM << 8) | 0xC4
     rep     stosw
-
-    mov     di, (4 * 80 + 0) * 2
-    mov     ax, (0x08 << 8) | 0xC7
+    mov     di, DIVIDER2_ROW * VGA_ROW_BYTES
+    mov     ax, (COL_DIM << 8) | 0xC7
     stosw
-    mov     di, (4 * 80 + 79) * 2
-    mov     ax, (0x08 << 8) | 0xB6
+    mov     di, (DIVIDER2_ROW * SCREEN_COLS + 79) * 2
+    mov     ax, (COL_DIM << 8) | 0xB6
     stosw
 
-    mov     bx, 5
-.border_rows:
-    cmp     bx, 23
-    jge     .border_done
+    mov     bx, PANEL_START_ROW
+.borders:
+    cmp     bx, PANEL_END_ROW
+    jg      .borders_done
+
     mov     di, bx
-    imul    di, di, 80
+    imul    di, di, SCREEN_COLS
     shl     di, 1
-
-    mov     ax, (0x08 << 8) | 0xB3
+    mov     ax, (COL_DIM << 8) | 0xB3
     stosw
 
     mov     di, bx
-    imul    di, di, 80
-    add     di, 24
+    imul    di, di, SCREEN_COLS
+    add     di, LEFT_PANEL_COLS
     shl     di, 1
     stosw
 
     mov     di, bx
-    imul    di, di, 80
-    add     di, 25
+    imul    di, di, SCREEN_COLS
+    add     di, LEFT_PANEL_COLS + 1
     shl     di, 1
-    mov     ax, (0x08 << 8) | 0xB3
+    mov     ax, (COL_DIM << 8) | 0xB3
     stosw
 
     mov     di, bx
-    imul    di, di, 80
+    imul    di, di, SCREEN_COLS
     add     di, 79
     shl     di, 1
     stosw
 
     inc     bx
-    jmp     .border_rows
-.border_done:
+    jmp     .borders
 
-    mov     di, (5 * 80 + 1) * 2
-    mov     ah, 0x08
+.borders_done:
+    mov     di, (PANEL_START_ROW * SCREEN_COLS + 1) * 2
     mov     si, str_panel_payloads
-    call    _vga_str_es
+    mov     ah, COL_DIM
+    call    vga_puts
 
-    mov     di, (5 * 80 + 26) * 2
+    mov     di, (PANEL_START_ROW * SCREEN_COLS + RIGHT_PANEL_START + 1) * 2
     mov     si, str_panel_log
-    call    _vga_str_es
+    mov     ah, COL_DIM
+    call    vga_puts
 
-    mov     di, 23 * VGA_WIDTH_BYTES
+    mov     di, PANEL_END_ROW * VGA_ROW_BYTES
     mov     cx, SCREEN_COLS
-    mov     ax, (0x08 << 8) | 0xC4
+    mov     ax, (COL_DIM << 8) | 0xC4
     rep     stosw
-
-    mov     di, (23 * 80 + 0) * 2
-    mov     ax, (0x08 << 8) | 0xC0
+    mov     di, PANEL_END_ROW * VGA_ROW_BYTES
+    mov     ax, (COL_DIM << 8) | 0xC0
     stosw
-    mov     di, (23 * 80 + 24) * 2
-    mov     ax, (0x08 << 8) | 0xC1
+    mov     di, (PANEL_END_ROW * SCREEN_COLS + LEFT_PANEL_COLS) * 2
+    mov     ax, (COL_DIM << 8) | 0xC1
     stosw
-    mov     di, (23 * 80 + 79) * 2
-    mov     ax, (0x08 << 8) | 0xD9
+    mov     di, (PANEL_END_ROW * SCREEN_COLS + LEFT_PANEL_COLS + 1) * 2
+    mov     ax, (COL_DIM << 8) | 0xC4
+    stosw
+    mov     di, (PANEL_END_ROW * SCREEN_COLS + 79) * 2
+    mov     ax, (COL_DIM << 8) | 0xD9
     stosw
 
     pop     es
     popa
     ret
 
-_ui_draw_statusbar:
+ui_draw_statusbar:
     pusha
     push    es
-    mov     ax, VGA_TEXT_MEM
+    mov     ax, VGA_SEG
+    mov     es, ax
+    mov     di, STATUS_ROW * VGA_ROW_BYTES
+    mov     cx, SCREEN_COLS
+    mov     ax, (COL_STATUS << 8) | 0x20
+    rep     stosw
+    mov     di, STATUS_ROW * VGA_ROW_BYTES
+    mov     si, str_status
+    mov     ah, COL_STATUS
+    call    vga_puts
+    pop     es
+    popa
+    ret
+
+ui_draw_prompt:
+    pusha
+    push    es
+    mov     ax, VGA_SEG
     mov     es, ax
 
-    mov     di, STATUS_BAR_ROW * VGA_WIDTH_BYTES
+    mov     di, PROMPT_ROW * VGA_ROW_BYTES
     mov     cx, SCREEN_COLS
-    mov     ax, (0x30 << 8) | 0x20
+    mov     ax, (COL_DIM << 8) | 0x20
     rep     stosw
 
-    mov     di, STATUS_BAR_ROW * VGA_WIDTH_BYTES
-    mov     si, str_status_bar
-    mov     ah, 0x30
-    call    _vga_str_es
+    mov     di, PROMPT_ROW * VGA_ROW_BYTES
+    mov     si, str_prompt
+    mov     ah, COL_SUCCESS
+    call    vga_puts
+
+    mov     ah, 0x02
+    mov     bh, 0
+    mov     dh, PROMPT_ROW
+    mov     dl, 12
+    int     0x10
 
     pop     es
     popa
     ret
 
-_ui_redraw_payload_list:
+ui_redraw_payload_list:
     pusha
     push    es
-    mov     ax, VGA_TEXT_MEM
+    mov     ax, VGA_SEG
     mov     es, ax
 
-    mov     bx, 6
-.clear_row:
-    cmp     bx, 23
+    mov     bx, PANEL_START_ROW + 1
+.clear:
+    cmp     bx, PANEL_END_ROW
     jge     .clear_done
     mov     di, bx
-    imul    di, di, 80
+    imul    di, di, SCREEN_COLS
     add     di, 1
     shl     di, 1
-    mov     cx, 23
+    mov     cx, LEFT_PANEL_COLS - 1
     mov     ax, (0x01 << 8) | 0x20
     rep     stosw
     inc     bx
-    jmp     .clear_row
+    jmp     .clear
 .clear_done:
 
     xor     cx, cx
-    mov     bx, 6
+    mov     bx, PANEL_START_ROW + 1
 
-.list_loop:
+.entry:
     cmp     cx, [payload_count]
-    jge     .list_done
-    cmp     bx, 23
-    jge     .list_done
+    jge     .done
+    cmp     bx, PANEL_END_ROW
+    jge     .done
 
     mov     di, bx
-    imul    di, di, 80
+    imul    di, di, SCREEN_COLS
     add     di, 1
     shl     di, 1
 
-    cmp     cx, [selected_payload]
-    jne     .not_sel
+    cmp     cx, [selected_idx]
+    jne     .normal
 
-    push    di
-    mov     ax, (0x2F << 8) | 0x10
+    mov     ax, (COL_SELECTED << 8) | 0x10
     stosw
-    mov     ax, (0x2F << 8) | 0x10
     stosw
-    pop     di
+    sub     di, 4
     add     di, 4
-    mov     ah, 0x2F
-    jmp     .print_entry
+    mov     ah, COL_SELECTED
+    jmp     .print
 
-.not_sel:
+.normal:
     add     di, 4
-    mov     ah, 0x07
-
-.print_entry:
-    push    cx
-    mov     ax, cx
-    mov     bx, 32
-    mul     bx
-    mov     si, payload_table
-    add     si, ax
+    mov     ah, COL_NORMAL
 
     cmp     byte [payload_flags + cx], 0x02
-    jne     .not_danger
-    mov     ah, 0x0E
+    jne     .print
+    mov     ah, COL_WARN
 
-.not_danger:
-    call    _vga_str_es
+.print:
+    push    cx
+    mov     ax, cx
+    mov     bx, PAYLOAD_NAME_LEN
+    mul     bx
+    mov     si, payload_names
+    add     si, ax
+    call    vga_puts
     pop     cx
     inc     cx
 
-    mov     bx, 6
+    mov     bx, PANEL_START_ROW + 1
     add     bx, cx
-    jmp     .list_loop
+    jmp     .entry
 
-.list_done:
+.done:
     pop     es
     popa
     ret
 
-_ui_redraw_log:
+ui_redraw_log:
     pusha
     push    es
-    mov     ax, VGA_TEXT_MEM
+    mov     ax, VGA_SEG
     mov     es, ax
 
-    mov     bx, 6
+    mov     bx, PANEL_START_ROW + 1
 .clear:
-    cmp     bx, 23
+    cmp     bx, PANEL_END_ROW
     jge     .clear_done
     mov     di, bx
-    imul    di, di, 80
-    add     di, 26
+    imul    di, di, SCREEN_COLS
+    add     di, RIGHT_PANEL_START + 1
     shl     di, 1
-    mov     cx, 53
+    mov     cx, SCREEN_COLS - RIGHT_PANEL_START - 2
     mov     ax, (0x01 << 8) | 0x20
     rep     stosw
     inc     bx
@@ -1123,280 +1204,240 @@ _ui_redraw_log:
 .clear_done:
 
     mov     ax, [log_line_count]
-    sub     ax, LOG_VISIBLE_ROWS
-    jge     .scroll_ok
+    mov     cx, PANEL_END_ROW - PANEL_START_ROW - 1
+    sub     ax, cx
+    jge     .set_start
     xor     ax, ax
-.scroll_ok:
-    add     ax, [log_scroll]
+.set_start:
+    add     ax, [log_scroll_offset]
+
     mov     cx, ax
-    mov     bx, 6
+    mov     bx, PANEL_START_ROW + 1
 
-.render_loop:
-    cmp     bx, 23
-    jge     .render_done
+.render:
+    cmp     bx, PANEL_END_ROW
+    jge     .done
+    cmp     cx, [log_line_count]
+    jge     .done
 
-    push    bx
-    push    cx
-    mov     ax, cx
-    mov     bx, LOG_LINE_WIDTH
-    mul     bx
-    mov     si, log_buffer
-    add     si, ax
-
-    mov     di, sp
-    add     di, 4
-    pop     cx
-    pop     bx
-
-    push    bx
-    push    cx
     mov     ax, bx
-    imul    ax, ax, 80
-    add     ax, 26
+    imul    ax, ax, SCREEN_COLS
+    add     ax, RIGHT_PANEL_START + 1
     shl     ax, 1
     mov     di, ax
 
+    push    bx
+    push    cx
     mov     ax, cx
-    mov     bx, LOG_LINE_WIDTH
+    mov     bx, LOG_LINE_LEN
     mul     bx
-    mov     si, log_buffer
+    mov     si, log_buf
     add     si, ax
 
     mov     ax, cx
-    mov     bx, LOG_COLOR_WIDTH
-    mul     bx
-    mov     ah, [log_colors + ax]
+    mov     ah, [log_colors + cx]
 
-    call    _vga_str_es
+    call    vga_puts
     pop     cx
     pop     bx
 
     inc     cx
     inc     bx
-    cmp     cx, [log_line_count]
-    jl      .render_loop
+    jmp     .render
 
-.render_done:
+.done:
     pop     es
     popa
     ret
 
-_ui_draw_prompt:
+log_colored:
     pusha
-    push    es
-    mov     ax, VGA_TEXT_MEM
-    mov     es, ax
-
-    mov     di, (STATUS_BAR_ROW - 1) * VGA_WIDTH_BYTES
-    mov     cx, SCREEN_COLS
-    mov     ax, (0x08 << 8) | 0x20
-    rep     stosw
-
-    mov     di, (STATUS_BAR_ROW - 1) * VGA_WIDTH_BYTES
-    mov     si, str_prompt
-    mov     ah, 0x0A
-    call    _vga_str_es
-
-    mov     ax, VGA_TEXT_MEM >> 4
-    mov     bh, 0
-    mov     ah, 0x02
-    mov     dh, STATUS_BAR_ROW - 1
-    mov     dl, 9
-    int     0x10
-
-    pop     es
-    popa
-    ret
-
-_log_line_colored:
-    pusha
-    call    _log_add_line
-    mov     [log_color_temp], bl
+    push    bx
+    call    log_add_line
     dec     word [log_line_count]
     mov     ax, [log_line_count]
+    pop     bx
     mov     [log_colors + ax], bl
     inc     word [log_line_count]
-    call    _ui_redraw_log
+    call    ui_redraw_log
     popa
     ret
 
-_log_line_accent:
-    mov     bl, COLOR_ACCENT
-    call    _log_line_colored
+log_accent:
+    mov     bl, COL_ACCENT
+    call    log_colored
     ret
 
-_log_line_error:
-    mov     bl, COLOR_ERROR
-    call    _log_line_colored
+log_error:
+    mov     bl, COL_ERROR
+    call    log_colored
     ret
 
-_log_separator:
+log_separator:
     pusha
-    mov     si, str_separator
-    mov     bl, COLOR_DIM
-    call    _log_line_colored
+    mov     si, str_sep
+    mov     bl, COL_DIM
+    call    log_colored
     popa
     ret
 
-_log_add_line:
+log_add_line:
     pusha
     mov     ax, [log_line_count]
     cmp     ax, LOG_MAX_LINES
     jl      .ok
-    call    _log_scroll_up
+    call    log_scroll_up
     mov     ax, [log_line_count]
 .ok:
-    mov     bx, LOG_LINE_WIDTH
+    mov     bx, LOG_LINE_LEN
     mul     bx
-    mov     di, log_buffer
+    mov     di, log_buf
     add     di, ax
 
-    mov     cx, LOG_LINE_WIDTH - 1
+    mov     cx, LOG_LINE_LEN - 1
 .copy:
     lodsb
     test    al, al
     jz      .pad
     stosb
     loop    .copy
-    jmp     .done
+    jmp     .term
 .pad:
     mov     al, 0x20
     rep     stosb
-.done:
+.term:
     mov     byte [di], 0
     inc     word [log_line_count]
     popa
     ret
 
-_log_scroll_up:
+log_scroll_up:
     pusha
-    mov     si, log_buffer + LOG_LINE_WIDTH
-    mov     di, log_buffer
-    mov     cx, (LOG_MAX_LINES - 1) * LOG_LINE_WIDTH
+    mov     si, log_buf + LOG_LINE_LEN
+    mov     di, log_buf
+    mov     cx, (LOG_MAX_LINES - 1) * LOG_LINE_LEN
     rep     movsb
-
     mov     si, log_colors + 1
     mov     di, log_colors
     mov     cx, LOG_MAX_LINES - 1
     rep     movsb
-
     dec     word [log_line_count]
     popa
     ret
 
-_log_partial:
+log_partial:
     pusha
     mov     ax, [log_line_count]
-    mov     bx, LOG_LINE_WIDTH
+    mov     bx, LOG_LINE_LEN
     mul     bx
-    mov     di, log_buffer
+    mov     di, log_buf
     add     di, ax
-    mov     cx, [partial_offset]
+    mov     cx, [partial_col]
     add     di, cx
+
 .copy:
     lodsb
     test    al, al
     jz      .done
+    cmp     word [partial_col], LOG_LINE_LEN - 1
+    jge     .done
     stosb
-    inc     word [partial_offset]
+    inc     word [partial_col]
     jmp     .copy
 .done:
     popa
     ret
 
-_log_partial_colored:
+log_partial_col:
     ret
 
-_newline_log:
+emit_newline:
     pusha
-    mov     word [partial_offset], 0
+    mov     word [partial_col], 0
     inc     word [log_line_count]
     cmp     word [log_line_count], LOG_MAX_LINES
     jl      .ok
-    call    _log_scroll_up
+    call    log_scroll_up
 .ok:
-    call    _ui_redraw_log
+    call    ui_redraw_log
     popa
     ret
 
-_log_hex_word:
+emit_hex_word:
     pusha
     push    ax
     mov     cl, 12
     shr     ax, cl
-    call    _nibble_char
+    call    nibble_out
     pop     ax
     push    ax
     mov     cl, 8
     shr     ax, cl
-    and     al, 0xF
-    call    _nibble_char
+    and     al, 0x0F
+    call    nibble_out
     pop     ax
     push    ax
     mov     cl, 4
     shr     ax, cl
-    and     al, 0xF
-    call    _nibble_char
+    and     al, 0x0F
+    call    nibble_out
     pop     ax
-    and     al, 0xF
-    call    _nibble_char
+    and     al, 0x0F
+    call    nibble_out
     popa
     ret
 
-_log_hex_word_newline:
-    call    _log_hex_word
-    call    _newline_log
+emit_hex_word_nl:
+    call    emit_hex_word
+    call    emit_newline
     ret
 
-_log_hex_byte_newline:
+emit_hex_byte_nl:
     push    ax
     shr     al, 4
-    call    _nibble_char
+    call    nibble_out
     pop     ax
-    and     al, 0xF
-    call    _nibble_char
-    call    _newline_log
+    and     al, 0x0F
+    call    nibble_out
+    call    emit_newline
     ret
 
-_log_hex_byte_space:
+emit_hex_byte_sp:
     push    ax
     push    si
     push    ax
     shr     al, 4
-    call    _nibble_char
+    call    nibble_out
     pop     ax
-    and     al, 0xF
-    call    _nibble_char
+    and     al, 0x0F
+    call    nibble_out
     mov     si, str_space
-    call    _log_partial
+    call    log_partial
     pop     si
     pop     ax
     ret
 
-_log_decimal_kb:
+emit_hex_byte_inline:
+    push    ax
+    shr     al, 4
+    call    nibble_out
+    pop     ax
+    and     al, 0x0F
+    call    nibble_out
+    ret
+
+log_decimal:
     pusha
-    call    _decimal_to_str
-    mov     si, decimal_buf
-    call    _log_partial
-    mov     si, str_kb_suffix
-    mov     bl, COLOR_DIM
-    call    _log_line_colored
+    call    uint_to_str
+    mov     si, dec_buf
+    call    log_partial
     popa
     ret
 
-_log_decimal_newline:
-    pusha
-    call    _decimal_to_str
-    mov     si, decimal_buf
-    call    _log_partial
-    call    _newline_log
-    popa
-    ret
-
-_nibble_char:
+nibble_out:
     push    si
     push    ax
-    and     al, 0xF
+    and     al, 0x0F
     cmp     al, 9
     jbe     .digit
     add     al, 7
@@ -1404,14 +1445,14 @@ _nibble_char:
     add     al, 0x30
     mov     [nibble_tmp], al
     mov     si, nibble_tmp
-    call    _log_partial
+    call    log_partial
     pop     ax
     pop     si
     ret
 
-_decimal_to_str:
+uint_to_str:
     pusha
-    mov     di, decimal_buf + 9
+    mov     di, dec_buf + 9
     mov     byte [di], 0
     mov     bx, 10
     test    ax, ax
@@ -1432,7 +1473,7 @@ _decimal_to_str:
     popa
     ret
 
-_echo_char:
+echo_char:
     push    ax
     push    bx
     mov     ah, 0x0E
@@ -1442,7 +1483,7 @@ _echo_char:
     pop     ax
     ret
 
-_echo_backspace:
+echo_backspace:
     pusha
     mov     ah, 0x0E
     mov     al, 0x08
@@ -1454,7 +1495,7 @@ _echo_backspace:
     popa
     ret
 
-_newline_echo:
+echo_newline:
     pusha
     mov     ah, 0x0E
     mov     al, 0x0D
@@ -1464,49 +1505,113 @@ _newline_echo:
     popa
     ret
 
-_history_push:
+hist_push:
     pusha
-    mov     ax, [history_head]
-    mov     bx, HISTORY_ENTRY_SIZE
+    mov     ax, [hist_head]
+    mov     bx, HIST_ENTRY_SIZE
     mul     bx
-    mov     di, history_buffer
+    mov     di, hist_buf
     add     di, ax
-    mov     si, input_buffer
-    mov     cx, HISTORY_ENTRY_SIZE - 1
+
+    mov     si, input_buf
+    mov     cx, HIST_ENTRY_SIZE - 1
     rep     movsb
     mov     byte [di], 0
-    inc     word [history_head]
-    mov     ax, [history_head]
-    cmp     ax, HISTORY_DEPTH
+
+    inc     word [hist_head]
+    mov     ax, [hist_head]
+    cmp     ax, HIST_DEPTH
     jl      .ok
-    mov     word [history_head], 0
+    mov     word [hist_head], 0
 .ok:
-    mov     ax, [history_count]
-    cmp     ax, HISTORY_DEPTH
+    mov     ax, [hist_count]
+    cmp     ax, HIST_DEPTH
     jge     .max
-    inc     word [history_count]
+    inc     word [hist_count]
 .max:
-    mov     ax, [history_head]
-    mov     [history_cursor], ax
+    mov     ax, [hist_head]
+    mov     [hist_cursor], ax
     popa
     ret
 
-_history_prev:
+hist_prev:
+    pusha
+    mov     ax, [hist_count]
+    test    ax, ax
+    jz      .done
+
+    mov     ax, [hist_cursor]
+    test    ax, ax
+    jz      .wrap_prev
+    dec     ax
+    jmp     .load
+
+.wrap_prev:
+    mov     ax, HIST_DEPTH - 1
+
+.load:
+    mov     [hist_cursor], ax
+    mov     bx, HIST_ENTRY_SIZE
+    mul     bx
+    mov     si, hist_buf
+    add     si, ax
+
+    mov     di, input_buf
+    mov     cx, HIST_ENTRY_SIZE
+    rep     movsb
+
+    mov     cx, HIST_ENTRY_SIZE - 1
+    xor     ax, ax
+    repne   scasb
+    sub     di, input_buf
+    dec     di
+    mov     [input_len], di
+
+    call    ui_draw_prompt
+
+.done:
+    popa
     ret
 
-_history_next:
+hist_next:
+    pusha
+    mov     ax, [hist_count]
+    test    ax, ax
+    jz      .done
+
+    mov     ax, [hist_cursor]
+    inc     ax
+    cmp     ax, HIST_DEPTH
+    jl      .load
+    xor     ax, ax
+
+.load:
+    mov     [hist_cursor], ax
+    mov     bx, HIST_ENTRY_SIZE
+    mul     bx
+    mov     si, hist_buf
+    add     si, ax
+
+    mov     di, input_buf
+    mov     cx, HIST_ENTRY_SIZE
+    rep     movsb
+
+    call    ui_draw_prompt
+
+.done:
+    popa
     ret
 
-_strcmp_ci:
+strcmp_ci:
     push    si
     push    di
 .loop:
     mov     al, [si]
     mov     bl, [di]
-    call    _to_upper_al
+    call    to_upper
     push    ax
     mov     al, bl
-    call    _to_upper_al
+    call    to_upper
     mov     bl, al
     pop     ax
     cmp     al, bl
@@ -1527,7 +1632,7 @@ _strcmp_ci:
     or      ax, 1
     ret
 
-_strcmp_prefix:
+strcmp_pfx:
     push    si
     push    di
 .loop:
@@ -1535,10 +1640,10 @@ _strcmp_prefix:
     test    bl, bl
     jz      .match
     mov     al, [si]
-    call    _to_upper_al
+    call    to_upper
     push    ax
     mov     al, bl
-    call    _to_upper_al
+    call    to_upper
     mov     bl, al
     pop     ax
     cmp     al, bl
@@ -1557,7 +1662,7 @@ _strcmp_prefix:
     or      ax, 1
     ret
 
-_to_upper_al:
+to_upper:
     cmp     al, 'a'
     jb      .done
     cmp     al, 'z'
@@ -1566,10 +1671,10 @@ _to_upper_al:
 .done:
     ret
 
-_strcpy_16:
+strcpy_bounded:
     push    si
     push    di
-    mov     cx, 31
+    mov     cx, PAYLOAD_NAME_LEN - 1
 .loop:
     lodsb
     stosb
@@ -1582,7 +1687,7 @@ _strcpy_16:
     pop     si
     ret
 
-_skip_spaces:
+skip_spaces:
 .loop:
     cmp     byte [si], 0x20
     jne     .done
@@ -1591,10 +1696,10 @@ _skip_spaces:
 .done:
     ret
 
-_parse_decimal:
+parse_decimal:
     push    si
     xor     ax, ax
-    mov     cx, 0
+    xor     cx, cx
 .loop:
     mov     bl, [si]
     cmp     bl, '0'
@@ -1620,13 +1725,13 @@ _parse_decimal:
     stc
     ret
 
-_parse_hex_word:
+parse_hex_word:
     push    si
     xor     ax, ax
-    mov     cx, 0
+    xor     cx, cx
 .loop:
     mov     bl, [si]
-    call    _hex_nibble_val
+    call    hex_nibble
     jc      .done
     shl     ax, 4
     or      al, bl
@@ -1644,7 +1749,7 @@ _parse_hex_word:
     stc
     ret
 
-_hex_nibble_val:
+hex_nibble:
     cmp     bl, '0'
     jb      .bad
     cmp     bl, '9'
@@ -1665,7 +1770,7 @@ _hex_nibble_val:
     stc
     ret
 
-_vga_str_es:
+vga_puts:
     push    si
     push    di
 .loop:
@@ -1680,124 +1785,122 @@ _vga_str_es:
     pop     si
     ret
 
-LOG_LINE_WIDTH      equ 54
-LOG_COLOR_WIDTH     equ 1
-LOG_MAX_LINES       equ 256
-
 engine_drive        db 0
 nx_active           db 0
 smep_active         db 0
-cpuid_edx_feat      dd 0
-cpuid_ecx_feat      dd 0
+cpuid_edx           dd 0
+cpuid_ecx           dd 0
 conv_mem_kb         dw 0
-selected_payload    dw 0
+selected_idx        dw 0
 payload_count       dw 0
 log_line_count      dw 0
-log_scroll          dw 0
-history_head        dw 0
-history_count       dw 0
-history_cursor      dw 0
+log_scroll_offset   dw 0
+hist_head           dw 0
+hist_count          dw 0
+hist_cursor         dw 0
 input_len           dw 0
-partial_offset      dw 0
-log_color_temp      db 0
+partial_col         dw 0
 nibble_tmp          db 0, 0
 
-cpu_vendor_buf      times 13 db 0
+cpu_vendor          times 13 db 0
 cpu_brand           times 50 db 0
-decimal_buf         times 10 db 0
-input_buffer        times INPUT_BUFFER_SIZE db 0
-payload_table       times MAX_PAYLOAD_COUNT * 32 db 0
-payload_flags       times MAX_PAYLOAD_COUNT db 0
-history_buffer      times HISTORY_DEPTH * HISTORY_ENTRY_SIZE db 0
-log_buffer          times LOG_MAX_LINES * LOG_LINE_WIDTH db 0
+dec_buf             times 11 db 0
+input_buf           times INPUT_BUF_SIZE db 0
+payload_names       times MAX_PAYLOADS * PAYLOAD_NAME_LEN db 0
+payload_flags       times MAX_PAYLOADS db 0
+hist_buf            times HIST_DEPTH * HIST_ENTRY_SIZE db 0
+log_buf             times LOG_MAX_LINES * LOG_LINE_LEN db 0
 log_colors          times LOG_MAX_LINES db 0
 
-str_title_bar       db "  SX-SANDBOX  >>  SHELLCODE EXECUTION & ANALYSIS ENVIRONMENT  //  x86 BARE-METAL", 0
-str_title_right     db "BUILD 1.2.0", 0
-str_subtitle        db "Active Environment: 16-bit Real Mode  |  Arch: x86  |  BIOS: Legacy INT", 0
+str_title           db "  SX-SANDBOX  >>  SHELLCODE EXECUTION & ANALYSIS ENVIRONMENT  //  x86 REAL MODE", 0
+str_build           db "BUILD 2.0.0", 0
+str_subtitle        db "Arch: x86-16  |  Mode: Real  |  BIOS: Legacy INT  |  Target: 0xA000", 0
 str_panel_payloads  db "PAYLOADS", 0
 str_panel_log       db "EXECUTION LOG", 0
-str_status_bar      db "  [F1] Help  [TAB] Next  [ENTER] Run  |  run  list  sel <n>  dump <addr>  info  sandbox  clear", 0
+str_status          db "  [ENTER] Run  [UP/DN] History  |  run  list  sel <n>  dump <addr>  sandbox  info  clear  help", 0
 str_prompt          db "sx-sandbox> ", 0
-str_separator       db "----------------------------------------------", 0
-str_sandbox_init    db "[SANDBOX] Running environment checks...", 0
-str_nx_enabled      db "  [NX/DEP]  ACTIVE   -- exec protection detected", 0
-str_nx_disabled     db "  [NX/DEP]  INACTIVE -- memory regions executable", 0
-str_smep_on         db "  [SMEP]    ACTIVE   -- supervisor mode exec. prevented", 0
-str_smep_off        db "  [SMEP]    INACTIVE -- ring0 exec of user pages allowed", 0
-str_cpuid_vendor    db "  [CPUID]   Vendor identification:", 0
-str_prefix_vendor   db "    Vendor  : ", 0
-str_prefix_memory   db "    RAM     : ", 0
-str_a20_on          db "  [A20]     ENABLED  -- full address space accessible", 0
-str_a20_off         db "  [A20]     DISABLED -- wraparound mode active", 0
-str_exec_start      db "[EXEC] Dispatching payload...", 0
-str_prefix_exec     db "  Target  : ", 0
-str_sandbox_check   db "  Sandbox : active | NX bypass: analyzing...", 0
-str_no_payload      db "[ERR] No payload selected. Use: sel <n>", 0
-str_unknown_cmd     db "[ERR] Unknown command. Type 'help' for usage.", 0
-str_list_header     db "[PAYLOADS] Available shellcode modules:", 0
-str_list_prefix     db "  [ ] ", 0
-str_list_sel_prefix db "  [*] ", 0
-str_info_header     db "[INFO] SX-SANDBOX System Information", 0
-str_info_1          db "  Engine  : 16-bit real mode shellcode loader", 0
-str_info_2          db "  Stage2  : Loaded at 0x7E00 (this module)", 0
-str_info_3          db "  Sandbox : Loaded at 0x9000", 0
-str_info_4          db "  Shellcode Base: 0xA000", 0
-str_help_header     db "[HELP] Command Reference:", 0
-str_help_run        db "  run              Execute selected payload", 0
-str_help_list       db "  list             List available payloads", 0
-str_help_sel        db "  sel <n>          Select payload by index", 0
-str_help_sandbox    db "  sandbox          Re-run protection checks", 0
-str_help_dump       db "  dump <hex_addr>  Hexdump 32 bytes at address", 0
-str_help_info       db "  info             Show system information", 0
-str_help_clear      db "  clear            Clear execution log", 0
-str_sel_ok          db "[OK] Payload selected.", 0
-str_sel_bad         db "[ERR] Invalid index. Use a number.", 0
-str_sel_oob         db "[ERR] Index out of range.", 0
-str_dump_bad        db "[ERR] Invalid address. Use hex (e.g. dump 7c00)", 0
-str_kb_suffix       db " KB (conventional)", 0
-str_prefix_addr     db "  [0x", 0
-str_prefix_port     db "  PORT 0x", 0
-str_prefix_ss       db "  SS: 0x", 0
-str_prefix_sp       db "  SP: 0x", 0
-str_prefix_brand    db "  Brand  : ", 0
-str_prefix_stepping db "  Step   : ", 0
-str_colon_space     db ": ", 0
-str_arrow           db " -> 0x", 0
-str_space           db " ", 0
+str_sep             db "------------------------------------------------------", 0
+str_env_start       db "[ENV] Running environment security checks...", 0
+str_nx_on           db "  [NX/DEP]  ACTIVE   -- memory regions write-xor-exec", 0
+str_nx_off          db "  [NX/DEP]  INACTIVE -- regions are RWX, no exec guard", 0
+str_smep_on         db "  [SMEP]    ACTIVE   -- supervisor exec of user pages blocked", 0
+str_smep_off        db "  [SMEP]    INACTIVE -- ring0 can exec user-mode pages", 0
+str_cpuid_hdr       db "  [CPUID]   Vendor identification complete", 0
+str_vendor_pfx      db "    Vendor  : ", 0
+str_ram_pfx         db "    RAM     : ", 0
+str_a20_on          db "  [A20]     ENABLED  -- full 21-bit address space active", 0
+str_a20_off         db "  [A20]     DISABLED -- address line 20 wrap-around mode", 0
+str_kb              db " KB conventional", 0
+str_exec_dispatch   db "[EXEC] Dispatching selected payload...", 0
+str_pfx_target      db "  Target  : ", 0
+str_sandbox_active  db "  Sandbox : active | pre-exec scan complete", 0
+str_err_no_payload  db "[ERR] No valid payload selected. Use: sel <n>", 0
+str_err_unknown     db "[ERR] Unknown command. Type 'help' for usage.", 0
+str_list_hdr        db "[PAYLOADS] Available shellcode modules:", 0
+str_sel_marker      db "  [*] ", 0
+str_unsel_marker    db "  [ ] ", 0
+str_info_hdr        db "[INFO] SX-SANDBOX System Information", 0
+str_info_1          db "  Engine  : 16-bit real mode shellcode loader/sandbox", 0
+str_info_2          db "  Stage2  : 0x7E00  (this module, 12 sectors)", 0
+str_info_3          db "  Sandbox : 0x9000  (protection layer, 8 sectors)", 0
+str_info_4          db "  Payload : 0xA000  (runtime injection target)", 0
+str_help_hdr        db "[HELP] Command Reference:", 0
+str_help_run        db "  run              Execute selected payload through sandbox", 0
+str_help_list       db "  list             List all available payload modules", 0
+str_help_sel        db "  sel <n>          Select payload by index number", 0
+str_help_sandbox    db "  sandbox          Re-run environment security checks", 0
+str_help_dump       db "  dump <hex>       Hexdump 32 bytes at hex address", 0
+str_help_info       db "  info             Display system memory and module info", 0
+str_help_clear      db "  clear            Clear the execution log panel", 0
+str_sel_ok          db "[OK] Payload selection updated.", 0
+str_err_bad_idx     db "[ERR] Invalid index format. Provide a decimal number.", 0
+str_err_oob         db "[ERR] Index out of range.", 0
+str_err_bad_addr    db "[ERR] Invalid address. Use hex format, e.g.: dump 7c00", 0
+str_msgbox_hdr      db "[PAYLOAD:MSGBOX] Writing segment probe stub to 0xA000...", 0
+str_injected        db "  Shellcode written. Transferring control to 0xA000...", 0
+str_returned        db "  Returned cleanly. Stack and segment registers intact.", 0
+str_memwalk_hdr     db "[PAYLOAD:MEMWALK] Dumping BIOS Data Area (0x0400+):", 0
+str_port_hdr        db "[PAYLOAD:PORTPROBE] Sampling I/O ports (0x03F8 base):", 0
+str_stack_hdr       db "[PAYLOAD:STACKSMASH] Analyzing stack frame integrity...", 0
+str_canary_write    db "  Writing canary pattern 0xDEAD x4 to stack...", 0
+str_stack_ok        db "  All canaries intact. Stack integrity: PASS", 0
+str_stack_corrupt   db "[ERR] Stack corruption detected! Canary mismatch.", 0
+str_nx_hdr          db "[PAYLOAD:NXPROBE] Testing execute permission on 0xA000...", 0
+str_nx_exec         db "  NX inactive. Writing RET stub and executing...", 0
+str_nx_done         db "  Execution from data region succeeded. NX: ABSENT", 0
+str_nx_blocked      db "  NX active. Direct execution attempt would fault.", 0
+str_cpu_hdr         db "[PAYLOAD:CPUINFO] Enumerating CPU via CPUID leaves...", 0
+str_ivt_hdr         db "[PAYLOAD:IVTDUMP] Dumping interrupt vector table (0x0000):", 0
+str_no_brand        db "  Brand string not available (CPUID < 0x80000004)", 0
 str_feat_sse        db "  [FEAT] SSE  supported", 0
 str_feat_sse2       db "  [FEAT] SSE2 supported", 0
 str_feat_avx        db "  [FEAT] AVX  supported", 0
-str_no_brand        db "  Brand string not available (CPUID < 0x80000004)", 0
-str_pl_msgbox_1     db "[PAYLOAD:MSGBOX] Constructing position-independent stub...", 0
-str_pl_msgbox_2     db "  OpCode: MOV AX,0xC0 / MOV ES,AX / RETF", 0
-str_pl_injected     db "  Shellcode written to 0xA000. Transferring control...", 0
-str_pl_returned     db "  Returned cleanly. Stack integrity: OK", 0
-str_pl_memwalk_1    db "[PAYLOAD:MEMWALK] Dumping BIOS Data Area (0x0400+):", 0
-str_pl_port_1       db "[PAYLOAD:PORTPROBE] Sampling I/O ports (0x03F8 base):", 0
-str_pl_stack_1      db "[PAYLOAD:STACKSMASH] Analyzing stack frame integrity...", 0
-str_pl_stack_2      db "  Writing canary pattern 0xDEAD x4...", 0
-str_pl_stack_ok     db "  All canaries intact. Stack integrity: PASS", 0
-str_pl_stack_corrupt db "[ERR] Stack corruption detected!", 0
-str_pl_nx_1         db "[PAYLOAD:NXPROBE] Testing execute permission on data segment...", 0
-str_pl_nx_exec      db "  NX inactive. Writing RET stub to 0xA000 and executing...", 0
-str_pl_nx_done      db "  Execution succeeded. NX enforcement: ABSENT", 0
-str_pl_nx_blocked   db "  NX active. Execution attempt would fault. Skipping.", 0
-str_pl_cpu_1        db "[PAYLOAD:CPUINFO] Enumerating CPU via CPUID leaves...", 0
-str_payload_msgbox  db "MSGBOX  - Segment probe payload", 0
-str_payload_memwalk db "MEMWALK - BDA memory walker", 0
-str_payload_portprobe db "PORTPROBE - I/O port sampler", 0
-str_payload_stacksmash db "STACKSMASH - Canary integrity test", 0
-str_payload_nxprobe db "NXPROBE - NX/DEP execution test", 0
-str_payload_cpuinfo db "CPUINFO - Full CPUID enumeration", 0
+str_pfx_addr        db "  [0x", 0
+str_pfx_port        db "  PORT 0x", 0
+str_pfx_ss          db "  SS: 0x", 0
+str_pfx_sp          db "  SP: 0x", 0
+str_pfx_brand       db "  Brand  : ", 0
+str_pfx_step        db "  Step   : ", 0
+str_pfx_vec         db "  VEC[0x", 0
+str_colon_sp        db "]: ", 0
+str_arrow           db " -> 0x", 0
+str_space           db " ", 0
 
-cmd_run     db "RUN", 0
-cmd_list    db "LIST", 0
-cmd_info    db "INFO", 0
-cmd_clear   db "CLEAR", 0
-cmd_help    db "HELP", 0
-cmd_sel     db "SEL", 0
-cmd_sandbox db "SANDBOX", 0
-cmd_dump    db "DUMP", 0
+str_pl_msgbox       db "MSGBOX     - Segment register probe", 0
+str_pl_memwalk      db "MEMWALK    - BDA memory region walker", 0
+str_pl_portprobe    db "PORTPROBE  - I/O port sampler", 0
+str_pl_stacksmash   db "STACKSMASH - Canary integrity test [!]", 0
+str_pl_nxprobe      db "NXPROBE    - NX/DEP execution probe", 0
+str_pl_cpuinfo      db "CPUINFO    - Full CPUID enumeration", 0
+str_pl_ivtdump      db "IVTDUMP    - IVT vector dump (INT 0-15)", 0
+
+cmd_run             db "RUN", 0
+cmd_list            db "LIST", 0
+cmd_info            db "INFO", 0
+cmd_clear           db "CLEAR", 0
+cmd_help            db "HELP", 0
+cmd_sel             db "SEL", 0
+cmd_sandbox         db "SANDBOX", 0
+cmd_dump            db "DUMP", 0
 
 times 6144 - ($ - $$) db 0
