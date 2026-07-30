@@ -1,52 +1,41 @@
 BITS 16
 ORG 0x7C00
 
-LOADER_VERSION      equ 0x0102
-STAGE2_LOAD_SEG     equ 0x0000
-STAGE2_LOAD_OFF     equ 0x7E00
-STAGE2_SECTORS      equ 12
-STAGE2_START_SECTOR equ 2
-SANDBOX_SEG         equ 0x0000
-SANDBOX_OFF         equ 0x9000
-SANDBOX_SECTORS     equ 8
-SANDBOX_START_SEC   equ 14
-SHELLCODE_SEG       equ 0x0000
-SHELLCODE_OFF       equ 0xA000
-SHELLCODE_SECTORS   equ 4
-SHELLCODE_START_SEC equ 22
-DISK_RETRY_COUNT    equ 5
-VGA_TEXT_MEM        equ 0xB800
-COLOR_HEADER        equ 0x0F
-COLOR_INFO          equ 0x0A
-COLOR_WARN          equ 0x0E
-COLOR_ERROR         equ 0x0C
-COLOR_DIM           equ 0x08
-SCREEN_COLS         equ 80
+STAGE2_SEG              equ 0x0000
+STAGE2_OFF              equ 0x7E00
+STAGE2_LBA              equ 2
+STAGE2_SECTORS          equ 12
 
-jmp short _boot_entry
+SANDBOX_SEG             equ 0x0000
+SANDBOX_OFF             equ 0x9000
+SANDBOX_LBA             equ 14
+SANDBOX_SECTORS         equ 8
+
+SHELLCODE_SEG           equ 0x0000
+SHELLCODE_OFF           equ 0xA000
+SHELLCODE_LBA           equ 22
+SHELLCODE_SECTORS       equ 4
+
+DISK_RETRIES            equ 5
+VGA_SEG                 equ 0xB800
+SCREEN_COLS             equ 80
+SCREEN_ROWS             equ 25
+
+COL_DEFAULT             equ 0x07
+COL_HEADER              equ 0x0F
+COL_OK                  equ 0x0A
+COL_WARN                equ 0x0E
+COL_ERROR               equ 0x0C
+COL_DIM                 equ 0x08
+COL_BANNER              equ 0x4F
+COL_ACCENT              equ 0x0B
+
+jmp short boot_entry
 nop
 
-db "SXLOADER"
-dw 512
-db 1
-dw 1
-db 2
-dw 224
-dw 2880
-db 0xF0
-dw 9
-dw 18
-dw 2
-dd 0
-dd 0
-db 0x80
-db 0
-db 0x29
-dd 0xDEADBEEF
-db "SXSANDBOX  "
-db "FAT12   "
+times 59 db 0
 
-_boot_entry:
+boot_entry:
     cli
     xor     ax, ax
     mov     ds, ax
@@ -64,367 +53,305 @@ _boot_entry:
     mov     cx, 0x2607
     int     0x10
 
-    call    _draw_banner
-    call    _draw_layout
+    call    vga_clear
+    call    vga_draw_banner
 
-    mov     byte [load_phase], 0
-    mov     si, str_loading_stage2
-    mov     bl, COLOR_INFO
-    call    _status_print
-
-    mov     ax, STAGE2_LOAD_SEG
-    mov     es, ax
-    mov     bx, STAGE2_LOAD_OFF
+    mov     si, msg_load_stage2
+    mov     bl, COL_OK
+    call    status_writeln
+    mov     ax, STAGE2_SEG
+    mov     bx, STAGE2_OFF
     mov     cx, STAGE2_SECTORS
-    mov     dx, STAGE2_START_SECTOR
-    call    _load_sectors
-    jc      _fatal_disk_error
+    mov     dx, STAGE2_LBA
+    call    disk_load
+    jc      fatal_disk
 
-    mov     byte [load_phase], 1
-    mov     si, str_loading_sandbox
-    mov     bl, COLOR_INFO
-    call    _status_print
-
+    mov     si, msg_load_sandbox
+    mov     bl, COL_OK
+    call    status_writeln
     mov     ax, SANDBOX_SEG
-    mov     es, ax
     mov     bx, SANDBOX_OFF
     mov     cx, SANDBOX_SECTORS
-    mov     dx, SANDBOX_START_SEC
-    call    _load_sectors
-    jc      _fatal_disk_error
+    mov     dx, SANDBOX_LBA
+    call    disk_load
+    jc      fatal_disk
 
-    mov     byte [load_phase], 2
-    mov     si, str_loading_shell
-    mov     bl, COLOR_INFO
-    call    _status_print
-
+    mov     si, msg_load_shell
+    mov     bl, COL_OK
+    call    status_writeln
     mov     ax, SHELLCODE_SEG
-    mov     es, ax
     mov     bx, SHELLCODE_OFF
     mov     cx, SHELLCODE_SECTORS
-    mov     dx, SHELLCODE_START_SEC
-    call    _load_sectors
-    jc      _fatal_disk_error
+    mov     dx, SHELLCODE_LBA
+    call    disk_load
+    jc      fatal_disk
 
-    mov     si, str_launch
-    mov     bl, COLOR_HEADER
-    call    _status_print
+    mov     si, msg_launch
+    mov     bl, COL_HEADER
+    call    status_writeln
 
-    call    _progress_animate
+    call    progress_bar
 
+    mov     dl, [boot_drive]
     xor     ax, ax
     mov     es, ax
-    mov     dl, [boot_drive]
+    jmp     STAGE2_SEG:STAGE2_OFF
 
-    jmp     STAGE2_LOAD_SEG:STAGE2_LOAD_OFF
-
-_load_sectors:
+disk_load:
     push    bp
     mov     bp, sp
+    sub     sp, 10
+
+    mov     [bp-2],  ax
+    mov     [bp-4],  bx
+    mov     [bp-6],  cx
+    mov     [bp-8],  dx
+    mov     word [bp-10], 0
+
+    mov     cx, [bp-6]
+
+.next:
     push    cx
-    push    dx
-    push    bx
-    push    es
 
-    mov     [.target_seg], es
-    mov     [.target_off], bx
-    mov     [.sector_count], cx
-    mov     [.lba], dx
+    mov     ax, [bp-8]
+    call    lba_to_chs
 
-    mov     cx, [.sector_count]
-    mov     ax, [.lba]
-
-.next_sector:
-    push    cx
-    call    _lba_to_chs
-    mov     cx, DISK_RETRY_COUNT
+    mov     cx, DISK_RETRIES
 
 .retry:
     push    cx
-    mov     ax, [.target_seg]
+    mov     ax, [bp-2]
     mov     es, ax
-    mov     bx, [.target_off]
+    mov     bx, [bp-4]
     mov     ax, 0x0201
-    mov     cx, [.chs_cylinder]
-    mov     dh, [.chs_head]
+    mov     cx, [chs_cyl]
+    mov     dh, [chs_head]
     mov     dl, [boot_drive]
     int     0x13
     pop     cx
-    jnc     .sector_ok
-    pusha
+    jnc     .ok
+
+    push    ax
     xor     ax, ax
     mov     dl, [boot_drive]
     int     0x13
-    popa
+    pop     ax
     loop    .retry
-    stc
-    pop     cx
-    jmp     .done
 
-.sector_ok:
-    mov     ax, [.target_off]
-    add     ax, 512
-    mov     [.target_off], ax
-    jnc     .no_seg_update
-    mov     ax, [.target_seg]
-    add     ax, 0x1000
-    mov     [.target_seg], ax
-
-.no_seg_update:
-    mov     ax, [.lba]
-    inc     ax
-    mov     [.lba], ax
     pop     cx
-    loop    .next_sector
-    clc
-
-.done:
-    pop     es
-    pop     bx
-    pop     dx
-    pop     cx
+    mov     sp, bp
     pop     bp
+    stc
     ret
 
-.target_seg     dw 0
-.target_off     dw 0
-.sector_count   dw 0
-.lba            dw 0
-.chs_cylinder   dw 0
-.chs_head       db 0
+.ok:
+    mov     ax, [bp-4]
+    add     ax, 512
+    mov     [bp-4], ax
+    jnc     .no_seg
 
-_lba_to_chs:
-    mov     ax, [.lba]
+    mov     ax, [bp-2]
+    add     ax, 0x1000
+    mov     [bp-2], ax
+
+.no_seg:
+    inc     word [bp-8]
+    pop     cx
+    loop    .next
+
+    mov     sp, bp
+    pop     bp
+    clc
+    ret
+
+lba_to_chs:
+    push    ax
+    push    dx
     xor     dx, dx
-    div     word [sectors_per_track]
-    mov     byte [_load_sectors.chs_head + 1], dl
-    inc     byte [_load_sectors.chs_head + 1]
+    div     word [spt]
+    mov     [chs_sect], dl
+    inc     byte [chs_sect]
     xor     dx, dx
-    div     word [num_heads]
-    mov     byte [_load_sectors.chs_head], dl
-    mov     cl, ah
+    div     word [heads]
+    mov     [chs_head], dl
+    mov     cl, [chs_sect]
     and     cl, 0x3F
     shl     ah, 6
-    or      ah, cl
-    mov     [_load_sectors.chs_cylinder], ax
+    or      cl, ah
+    mov     ch, al
+    mov     [chs_cyl], cx
+    pop     dx
+    pop     ax
     ret
 
-sectors_per_track   dw 18
-num_heads           dw 2
-
-_draw_banner:
+vga_clear:
     pusha
     push    es
-    mov     ax, VGA_TEXT_MEM
+    mov     ax, VGA_SEG
+    mov     es, ax
+    xor     di, di
+    mov     cx, SCREEN_COLS * SCREEN_ROWS
+    mov     ax, (COL_DEFAULT << 8) | 0x20
+    rep     stosw
+    pop     es
+    popa
+    ret
+
+vga_draw_banner:
+    pusha
+    push    es
+    mov     ax, VGA_SEG
     mov     es, ax
 
     xor     di, di
-    mov     cx, 80 * 25
-    mov     ax, 0x0000 | (0x00 << 8)
-    mov     ah, 0x01
+    mov     cx, SCREEN_COLS
+    mov     ax, (0x40 << 8) | 0x20
     rep     stosw
 
-    mov     di, (0 * 80 + 0) * 2
-    mov     cx, 80
-    mov     ax, (0x40 << 8) | 0xDC
+    mov     di, 4
+    mov     si, str_banner
+    mov     ah, COL_BANNER
+    call    vga_puts
+
+    mov     di, (2 * SCREEN_COLS * 2)
+    mov     cx, SCREEN_COLS
+    mov     ax, (COL_DIM << 8) | 0xCD
     rep     stosw
 
-    mov     si, str_banner_title
-    mov     di, (0 * 80 + 2) * 2
-    mov     ah, 0x4F
-    call    _vga_print_at
+    mov     di, (2 * SCREEN_COLS * 2)
+    mov     ax, (COL_DIM << 8) | 0xC9
+    stosw
+    mov     di, (2 * SCREEN_COLS + 79) * 2
+    mov     ax, (COL_DIM << 8) | 0xBB
+    stosw
 
+    mov     di, (3 * SCREEN_COLS * 2)
+    mov     cx, SCREEN_COLS
+    mov     ax, (COL_DIM << 8) | 0x20
+    rep     stosw
+
+    mov     di, (3 * SCREEN_COLS + 2) * 2
     mov     si, str_banner_sub
-    mov     di, (0 * 80 + 44) * 2
-    mov     ah, 0x48
-    call    _vga_print_at
+    mov     ah, COL_ACCENT
+    call    vga_puts
 
-    mov     di, (2 * 80 + 0) * 2
-    mov     cx, 80
-    mov     ax, (0x08 << 8) | 0xC4
-    rep     stosw
-
-    mov     si, str_section_loader
-    mov     di, (4 * 80 + 2) * 2
-    mov     ah, COLOR_HEADER
-    call    _vga_print_at
-
-    mov     si, str_section_status
-    mov     di, (4 * 80 + 42) * 2
-    mov     ah, COLOR_HEADER
-    call    _vga_print_at
-
-    mov     di, (3 * 80 + 0) * 2
-    mov     cx, 80
-    mov     ax, (0x08 << 8) | 0x20
+    mov     di, (4 * SCREEN_COLS * 2)
+    mov     cx, SCREEN_COLS
+    mov     ax, (COL_DIM << 8) | 0xC4
     rep     stosw
 
     pop     es
     popa
     ret
 
-_draw_layout:
-    pusha
-    push    es
-    mov     ax, VGA_TEXT_MEM
-    mov     es, ax
-
-    mov     cx, 18
-    mov     bx, 6
-
-.draw_row:
-    mov     di, bx
-    imul    di, di, 80
-    add     di, 0
-    shl     di, 1
-    mov     ax, (0x08 << 8) | 0xB3
-    stosw
-    mov     di, bx
-    imul    di, di, 80
-    add     di, 40
-    shl     di, 1
-    mov     ax, (0x08 << 8) | 0xB3
-    stosw
-    inc     bx
-    loop    .draw_row
-
-    mov     di, (6 * 80 + 1) * 2
-    mov     cx, 38
-    mov     ax, (0x08 << 8) | 0xC4
-    rep     stosw
-
-    mov     di, (6 * 80 + 41) * 2
-    mov     cx, 38
-    rep     stosw
-
-    pop     es
-    popa
-    ret
-
-_vga_print_at:
-    push    es
-    push    ax
-    push    di
+vga_puts:
     push    si
-    mov     bx, ax
-
-.loop:
+    push    di
+.lp:
     lodsb
     test    al, al
     jz      .done
-    mov     ah, bh
-    stosw
-    jmp     .loop
-
+    mov     [es:di], ax
+    add     di, 2
+    jmp     .lp
 .done:
-    pop     si
     pop     di
-    pop     ax
-    pop     es
+    pop     si
     ret
 
-_status_print:
+status_writeln:
     pusha
     push    es
-
-    mov     ax, VGA_TEXT_MEM
+    mov     ax, VGA_SEG
     mov     es, ax
 
-    mov     al, [status_row]
-    mov     ah, 0
-    imul    ax, ax, 80
+    movzx   ax, byte [status_row]
+    imul    ax, ax, SCREEN_COLS
     add     ax, 42
     shl     ax, 1
     mov     di, ax
     mov     ah, bl
 
-.loop:
+.lp:
     lodsb
     test    al, al
     jz      .done
     stosw
-    jmp     .loop
+    jmp     .lp
 
 .done:
     inc     byte [status_row]
-
     pop     es
     popa
     ret
 
-_progress_animate:
+progress_bar:
     pusha
     push    es
-
-    mov     ax, VGA_TEXT_MEM
+    mov     ax, VGA_SEG
     mov     es, ax
 
-    mov     si, str_progress_label
-    mov     di, (22 * 80 + 2) * 2
-    mov     ah, COLOR_DIM
-    call    _vga_print_at
+    mov     si, str_progress
+    mov     di, (22 * SCREEN_COLS + 2) * 2
+    mov     ah, COL_DIM
+    call    vga_puts
 
     mov     cx, 50
-    mov     bx, (22 * 80 + 18) * 2
+    mov     di, (22 * SCREEN_COLS + 18) * 2
 
-.bar_loop:
+.lp:
     push    cx
-    push    bx
+    mov     ax, (COL_OK << 8) | 0xDB
+    mov     [es:di], ax
+    add     di, 2
 
-    mov     di, bx
-    mov     ax, (0x0A << 8) | 0xDB
-    stosw
-
-    mov     cx, 0x2FFF
+    mov     cx, 0x3FFF
 .delay:
     loop    .delay
 
-    pop     bx
     pop     cx
-    add     bx, 2
-    loop    .bar_loop
+    loop    .lp
 
     pop     es
     popa
     ret
 
-_fatal_disk_error:
+fatal_disk:
     push    es
-    mov     ax, VGA_TEXT_MEM
+    mov     ax, VGA_SEG
     mov     es, ax
-
-    mov     si, str_disk_error
-    mov     di, (23 * 80 + 2) * 2
-    mov     ah, COLOR_ERROR
-    call    _vga_print_at
-
-    mov     si, str_halt_msg
-    mov     di, (24 * 80 + 2) * 2
-    mov     ah, COLOR_WARN
-    call    _vga_print_at
-
+    mov     si, msg_disk_err
+    mov     di, (23 * SCREEN_COLS + 2) * 2
+    mov     ah, COL_ERROR
+    call    vga_puts
+    mov     si, msg_halt
+    mov     di, (24 * SCREEN_COLS + 2) * 2
+    mov     ah, COL_WARN
+    call    vga_puts
     pop     es
-
 .freeze:
     cli
     hlt
     jmp     .freeze
 
 boot_drive      db 0
-load_phase      db 0
-status_row      db 7
+status_row      db 5
+spt             dw 18
+heads           dw 2
+chs_cyl         dw 0
+chs_head        db 0
+chs_sect        db 0
 
-str_banner_title    db "  SX-SANDBOX  SHELLCODE EXECUTION ENVIRONMENT  v1.2", 0
-str_banner_sub      db "x86 BARE-METAL", 0
-str_section_loader  db "[ LOADER SUBSYSTEM ]", 0
-str_section_status  db "[ BOOT STATUS ]", 0
-str_loading_stage2  db "[*] Initializing execution engine...", 0
-str_loading_sandbox db "[*] Loading sandbox protection layer...", 0
-str_loading_shell   db "[*] Staging shellcode payloads...", 0
-str_launch          db "[+] All modules verified. Launching...", 0
-str_progress_label  db "LOADING  [", 0
-str_disk_error      db "[!] FATAL: Disk read failure. Sector unreadable.", 0
-str_halt_msg        db "    System halted. Press RESET to restart.", 0
+str_banner      db "  SX-SANDBOX  |  SHELLCODE EXECUTION ENVIRONMENT  |  v2.0  |  x86 BARE-METAL", 0
+str_banner_sub  db "Loader v2.0  >>  Initializing subsystems...", 0
+str_progress    db "LOADING  [", 0
+
+msg_load_stage2 db "[*] Loading execution engine (stage2)...", 0
+msg_load_sandbox db "[*] Loading sandbox protection layer...", 0
+msg_load_shell  db "[*] Staging shellcode payloads...", 0
+msg_launch      db "[+] All modules verified. Transferring control...", 0
+msg_disk_err    db "[!] FATAL: Disk read failure. Sector unreadable.", 0
+msg_halt        db "    System halted. Press RESET to restart.", 0
 
 times 510 - ($ - $$) db 0
 dw 0xAA55
