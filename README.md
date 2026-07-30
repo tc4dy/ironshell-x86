@@ -6,19 +6,21 @@
 
 [![Architecture](https://img.shields.io/badge/arch-x86%2016--bit-blue)]()
 [![Language](https://img.shields.io/badge/language-NASM%20Assembly-red)]()
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Mode](https://img.shields.io/badge/mode-Ring%200%20%2F%20Real%20Mode-critical)]()
+[![Sandbox](https://img.shields.io/badge/sandbox-4%20policy%20levels-orange)]()
+[![Payloads](https://img.shields.io/badge/payloads-7%20injectable%20modules-purple)]()
+[![Boot](https://img.shields.io/badge/boot-MBR%20%2B%202--Stage%20Loader-blueviolet)]()
 
 ---
 
 ## ✨ Features
 
 - 🥾 **2-Stage Bootloader** — Stage 1 MBR loads Stage 2 + Sandbox + Shellcode from disk with retry logic
-- 🖥️ **TUI Shell** — Full interactive terminal UI with dual-panel VGA layout, command history, and live execution log
-- 💉 **6 Injectable Payloads** — MSGBOX, MEMWALK, PORTPROBE, STACKSMASH, NXPROBE, CPUINFO
+- 🖥️ **TUI Shell** — Full interactive terminal UI with dual-panel VGA layout, command history (↑↓), and live execution log
+- 💉 **7 Injectable Payloads** — MSGBOX, MEMWALK, PORTPROBE, STACKSMASH, NXPROBE, CPUINFO, IVTDUMP
 - 🛡️ **Sandbox Layer** — 4 enforcement policies, pre-execution opcode scanning, IVT snapshot diffing, register integrity checks
 - 🔬 **Hardware Analysis** — CPUID vendor/brand/feature detection, A20 gate test, conventional memory sizing
-- ⚙️ **Clean Build System** — NASM + QEMU Makefile with GDB debug stub, ndisasm disassembly, and binary size validation
+- ⚙️ **Clean Build System** — NASM + QEMU Makefile with GDB debug stub, ndisasm disassembly, and hard binary size validation
 
 ---
 
@@ -26,6 +28,7 @@
 ![Scheme](/Photos/scheme.png)
 
 ---
+
 ## 📦 Installation
 
 ### 1. Clone the repository
@@ -79,6 +82,8 @@ Once booted in QEMU, the interactive shell accepts:
 | `clear` | Clear the execution log panel |
 | `help` | Show full command reference |
 
+> **Tip:** Use ↑ / ↓ arrow keys to navigate command history during input.
+
 ---
 
 ## 💉 Payload Reference
@@ -91,6 +96,7 @@ Once booted in QEMU, the interactive shell accepts:
 | 3 | `STACKSMASH` | Writes canary pattern to stack and verifies integrity | ⚠️ Caution |
 | 4 | `NXPROBE` | Tests NX/DEP enforcement by executing a RET stub | ✅ Safe |
 | 5 | `CPUINFO` | Full CPUID enumeration — vendor, brand, stepping, SSE/AVX | ✅ Safe |
+| 6 | `IVTDUMP` | Dumps the first 16 Interrupt Vector Table entries (INT 0–15) | ✅ Safe |
 
 ---
 
@@ -107,8 +113,8 @@ The sandbox module (`sandbox.asm`) loads at `0x9000` and enforces one of four ac
 
 Pre-execution analysis includes:
 
-- **Opcode scanning** — detects `IN`/`OUT`, `CLI`, `WBINVD`, `RDMSR`/`WRMSR`
-- **IVT diffing** — compares interrupt vector table before and after execution
+- **Opcode scanning** — detects `IN`/`OUT`, `CLI`, `WBINVD`, `RDMSR`/`WRMSR` across 128 bytes of payload (doubled from v1)
+- **IVT diffing** — compares all 256 interrupt vector table entries before and after execution
 - **Register integrity** — verifies `SS`, `DS`, and segment state post-execution
 - **Bounds check** — confirms payload origin is within `0xA000–0xAFFF`
 
@@ -165,5 +171,3 @@ ironshell-x86/
 ├── sandbox.asm     Protection layer, policy engine, IVT diffing
 └── Makefile        Build, run, debug, disasm targets
 ```
-
-
