@@ -1,3 +1,4 @@
+
 BITS 16
 ORG 0x9000
 
@@ -6,27 +7,22 @@ POLICY_BLOCK_DANGER     equ 0x01
 POLICY_AUDIT_ONLY       equ 0x02
 POLICY_LOCKDOWN         equ 0x03
 
-EXEC_FLAG_PIC           equ 0x01
 EXEC_FLAG_DANGEROUS     equ 0x02
 EXEC_FLAG_RING0         equ 0x04
 EXEC_FLAG_IO_ACCESS     equ 0x08
 
-REPORT_BASE             equ 0x8000
-REPORT_MAX_ENTRIES      equ 32
-REPORT_ENTRY_SIZE       equ 48
+SHELLCODE_BASE          equ 0xA000
+SHELLCODE_LIMIT         equ 0xAFFF
+SCAN_DEPTH              equ 128
 
-SHELLCODE_EXEC_BASE     equ 0xA000
-SHELLCODE_EXEC_LIMIT    equ 0xAFFF
-
-MAX_HOOK_COUNT          equ 16
-IVT_BASE                equ 0x0000
+IVT_ENTRY_COUNT         equ 256
 IVT_ENTRY_SIZE          equ 4
 
-VGA_TEXT_MEM            equ 0xB800
-COLOR_POLICY_ALLOW      equ 0x0A
-COLOR_POLICY_BLOCK      equ 0x0C
-COLOR_POLICY_AUDIT      equ 0x0E
-COLOR_POLICY_INFO       equ 0x0B
+REPORT_MAX              equ 32
+REPORT_ENTRY_SIZE       equ 16
+
+LOG_MAX                 equ 64
+LOG_ENTRY_SIZE          equ 48
 
 sandbox_entry:
     push    bp
@@ -39,25 +35,24 @@ sandbox_entry:
     mov     ds, ax
     mov     es, ax
 
-    mov     ax, [bp + 8]
-    mov     [sb_payload_flags], al
+    mov     al, [bp+8]
+    mov     [payload_flags], al
 
-    mov     ax, [bp + 6]
-    mov     [sb_payload_index], ax
+    mov     ax, [bp+6]
+    mov     [payload_index], ax
 
-    call    _sb_pre_exec_analysis
-    jc      .block
+    call    sb_pre_exec
+    jc      .blocked
 
-    call    _sb_snapshot_ivt
-    call    _sb_snapshot_registers
-
+    call    sb_snapshot_ivt
+    call    sb_snapshot_regs
     clc
-    jmp     .done
+    jmp     .exit
 
-.block:
+.blocked:
     stc
 
-.done:
+.exit:
     pop     es
     pop     ds
     popa
@@ -68,270 +63,244 @@ sandbox_post_exec:
     pusha
     push    ds
     push    es
+
     xor     ax, ax
     mov     ds, ax
     mov     es, ax
 
-    call    _sb_diff_ivt
-    call    _sb_check_register_state
-    call    _sb_record_exec_event
-    call    _sb_update_policy_score
+    call    sb_diff_ivt
+    call    sb_check_regs
+    call    sb_record_event
+    call    sb_update_score
 
     pop     es
     pop     ds
     popa
     ret
 
-sandbox_query_policy:
-    push    bx
-    mov     al, [active_policy]
-    pop     bx
-    ret
-
 sandbox_set_policy:
     cmp     al, POLICY_LOCKDOWN
-    ja      .invalid
+    ja      .reject
     mov     [active_policy], al
-    call    _sb_log_policy_change
+    mov     si, msg_policy_updated
+    call    sb_log_info
     clc
     ret
-.invalid:
+.reject:
     stc
     ret
 
+sandbox_get_policy:
+    mov     al, [active_policy]
+    ret
+
 sandbox_get_report:
-    push    bx
-    push    cx
-    mov     bx, report_buffer
-    mov     cx, [report_entry_count]
-    pop     cx
-    pop     bx
+    mov     bx, report_buf
+    mov     cx, [report_count]
     ret
 
 sandbox_reset:
     pusha
-    call    _sb_clear_report
-    call    _sb_reset_hooks
+    call    sb_clear_report
+    call    sb_clear_log
     mov     byte [active_policy], POLICY_BLOCK_DANGER
-    mov     word [report_entry_count], 0
+    mov     word [report_count], 0
     mov     word [violation_count], 0
     mov     word [exec_count], 0
     mov     byte [policy_score], 100
     popa
     ret
 
-_sb_pre_exec_analysis:
+sb_pre_exec:
     pusha
 
-    mov     al, [sb_payload_flags]
-    test    al, EXEC_FLAG_DANGEROUS
-    jz      .check_policy
-    cmp     byte [active_policy], POLICY_BLOCK_DANGER
-    jge     .blocked_dangerous
-    jmp     .check_policy
-
-.check_policy:
     cmp     byte [active_policy], POLICY_LOCKDOWN
-    je      .blocked_lockdown
+    je      .lockdown
 
     cmp     byte [active_policy], POLICY_AUDIT_ONLY
-    je      .audit_pass
+    je      .audit
 
-    call    _sb_verify_payload_bounds
-    jc      .blocked_bounds
+    mov     al, [payload_flags]
+    test    al, EXEC_FLAG_DANGEROUS
+    jz      .bounds
 
-    call    _sb_scan_payload_opcodes
-    jc      .blocked_opcode
+    cmp     byte [active_policy], POLICY_BLOCK_DANGER
+    jge     .dangerous
+
+.bounds:
+    call    sb_check_bounds
+    jc      .oob
+
+    call    sb_scan_opcodes
+    jc      .badop
 
     popa
     clc
     ret
 
-.blocked_dangerous:
-    mov     si, str_sb_blocked_danger
-    call    _sb_log_violation
-    inc     word [violation_count]
-    popa
-    stc
-    ret
+.lockdown:
+    mov     si, msg_lockdown
+    call    sb_log_violation
+    jmp     .fail
 
-.blocked_lockdown:
-    mov     si, str_sb_lockdown
-    call    _sb_log_violation
-    inc     word [violation_count]
-    popa
-    stc
-    ret
+.dangerous:
+    mov     si, msg_blocked_danger
+    call    sb_log_violation
+    jmp     .fail
 
-.blocked_bounds:
-    mov     si, str_sb_out_of_bounds
-    call    _sb_log_violation
-    inc     word [violation_count]
-    popa
-    stc
-    ret
-
-.blocked_opcode:
-    mov     si, str_sb_bad_opcode
-    call    _sb_log_violation
-    inc     word [violation_count]
-    popa
-    stc
-    ret
-
-.audit_pass:
-    mov     si, str_sb_audit_pass
-    call    _sb_log_info
-    popa
-    clc
-    ret
-
-_sb_verify_payload_bounds:
-    push    ax
-    push    bx
-    mov     ax, SHELLCODE_EXEC_BASE
-    cmp     ax, SHELLCODE_EXEC_BASE
-    jb      .oob
-    cmp     ax, SHELLCODE_EXEC_LIMIT
-    ja      .oob
-    pop     bx
-    pop     ax
-    clc
-    ret
 .oob:
-    pop     bx
+    mov     si, msg_oob
+    call    sb_log_violation
+    jmp     .fail
+
+.badop:
+    mov     si, msg_bad_opcode
+    call    sb_log_violation
+    jmp     .fail
+
+.audit:
+    mov     si, msg_audit_pass
+    call    sb_log_info
+    popa
+    clc
+    ret
+
+.fail:
+    inc     word [violation_count]
+    popa
+    stc
+    ret
+
+sb_check_bounds:
+    push    ax
+    mov     ax, [payload_exec_addr]
+    cmp     ax, SHELLCODE_BASE
+    jb      .fail
+    cmp     ax, SHELLCODE_LIMIT
+    ja      .fail
+    pop     ax
+    clc
+    ret
+.fail:
     pop     ax
     stc
     ret
 
-_sb_scan_payload_opcodes:
+sb_scan_opcodes:
     push    es
     push    si
     push    cx
-    push    bx
 
     xor     ax, ax
     mov     es, ax
-    mov     si, SHELLCODE_EXEC_BASE
-    mov     cx, 64
+    mov     si, SHELLCODE_BASE
+    mov     cx, SCAN_DEPTH
 
-.scan_loop:
+.loop:
     mov     al, [es:si]
+    inc     si
+    dec     cx
 
     cmp     al, 0xEE
-    je      .flag_io
+    je      .io
     cmp     al, 0xEF
-    je      .flag_io
+    je      .io
     cmp     al, 0xEC
-    je      .flag_io
+    je      .io
     cmp     al, 0xED
-    je      .flag_io
-
+    je      .io
     cmp     al, 0xFA
-    je      .flag_cli
+    je      .cli_insn
     cmp     al, 0x0F
-    je      .check_0f
-
+    je      .prefix_0f
     cmp     al, 0xCD
-    je      .check_int
+    je      .prefix_int
 
-    inc     si
-    loop    .scan_loop
-    pop     bx
-    pop     cx
-    pop     si
-    pop     es
-    clc
-    ret
+    test    cx, cx
+    jnz     .loop
+    jmp     .clean
 
-.check_0f:
+.prefix_0f:
+    test    cx, cx
+    jz      .clean
+    mov     al, [es:si]
     inc     si
     dec     cx
-    jz      .scan_done
-    mov     al, [es:si]
     cmp     al, 0x01
-    je      .flag_privileged
+    je      .priv
     cmp     al, 0x09
-    je      .flag_wbinvd
+    je      .priv
     cmp     al, 0x30
-    je      .flag_privileged
+    je      .priv
     cmp     al, 0x32
-    je      .flag_privileged
-    inc     si
-    loop    .scan_loop
-    jmp     .scan_done
+    je      .priv
+    test    cx, cx
+    jnz     .loop
+    jmp     .clean
 
-.check_int:
+.prefix_int:
+    test    cx, cx
+    jz      .clean
+    mov     al, [es:si]
     inc     si
     dec     cx
-    jz      .scan_done
-    mov     al, [es:si]
     cmp     al, 0x13
-    je      .flag_int13
+    je      .int13
     cmp     al, 0x1A
-    je      .flag_rtc
+    je      .int1a
     cmp     al, 0x15
-    je      .flag_extended
-    inc     si
-    loop    .scan_loop
-    jmp     .scan_done
+    je      .int15
+    test    cx, cx
+    jnz     .loop
+    jmp     .clean
 
-.flag_io:
-    mov     byte [scan_flags], EXEC_FLAG_IO_ACCESS
-    mov     si, str_sb_scan_io
-    call    _sb_log_info
-    jmp     .scan_done_ok
+.io:
+    mov     si, msg_scan_io
+    call    sb_log_info
+    xor     si, si
+    jmp     .clean
 
-.flag_cli:
-    mov     si, str_sb_scan_cli
-    call    _sb_log_info
-    jmp     .scan_done_ok
+.cli_insn:
+    mov     si, msg_scan_cli
+    call    sb_log_info
+    xor     si, si
+    jmp     .clean
 
-.flag_privileged:
-    mov     si, str_sb_scan_priv
-    call    _sb_log_violation
-    pop     bx
+.int13:
+    mov     si, msg_scan_int13
+    call    sb_log_info
+    xor     si, si
+    jmp     .clean
+
+.int1a:
+    mov     si, msg_scan_rtc
+    call    sb_log_info
+    xor     si, si
+    jmp     .clean
+
+.int15:
+    mov     si, msg_scan_e820
+    call    sb_log_info
+    xor     si, si
+    jmp     .clean
+
+.priv:
+    mov     si, msg_scan_priv
+    call    sb_log_violation
     pop     cx
     pop     si
     pop     es
     stc
     ret
 
-.flag_wbinvd:
-    mov     si, str_sb_scan_wbinvd
-    call    _sb_log_violation
-    pop     bx
-    pop     cx
-    pop     si
-    pop     es
-    stc
-    ret
-
-.flag_int13:
-    mov     si, str_sb_scan_int13
-    call    _sb_log_info
-    jmp     .scan_done_ok
-
-.flag_rtc:
-    mov     si, str_sb_scan_rtc
-    call    _sb_log_info
-    jmp     .scan_done_ok
-
-.flag_extended:
-    mov     si, str_sb_scan_e820
-    call    _sb_log_info
-    jmp     .scan_done_ok
-
-.scan_done_ok:
-.scan_done:
-    pop     bx
+.clean:
     pop     cx
     pop     si
     pop     es
     clc
     ret
 
-_sb_snapshot_ivt:
+sb_snapshot_ivt:
     pusha
     push    es
     push    ds
@@ -340,9 +309,9 @@ _sb_snapshot_ivt:
     mov     ds, ax
     mov     es, ax
 
-    mov     si, IVT_BASE
-    mov     di, ivt_snapshot
-    mov     cx, 256 * 2
+    mov     si, 0x0000
+    mov     di, ivt_snap
+    mov     cx, IVT_ENTRY_COUNT * 2
     rep     movsw
 
     pop     ds
@@ -350,176 +319,166 @@ _sb_snapshot_ivt:
     popa
     ret
 
-_sb_diff_ivt:
+sb_diff_ivt:
     pusha
-    push    es
     push    ds
 
     xor     ax, ax
     mov     ds, ax
-    mov     es, ax
 
-    mov     si, IVT_BASE
-    mov     di, ivt_snapshot
-    mov     cx, 256
+    mov     si, 0x0000
+    mov     di, ivt_snap
+    mov     cx, IVT_ENTRY_COUNT
     xor     bx, bx
 
-.check_vector:
+.check:
     mov     ax, [si]
     cmp     ax, [di]
-    jne     .vector_modified
-    mov     ax, [si + 2]
-    cmp     ax, [di + 2]
-    jne     .vector_modified
-    add     si, 4
-    add     di, 4
+    jne     .modified
+    mov     ax, [si+2]
+    cmp     ax, [di+2]
+    jne     .modified
+    add     si, IVT_ENTRY_SIZE
+    add     di, IVT_ENTRY_SIZE
     inc     bx
-    loop    .check_vector
+    loop    .check
     jmp     .done
 
-.vector_modified:
-    push    cx
-    push    bx
-    mov     [sb_modified_vector], bx
+.modified:
+    mov     [ivt_vec_num], bx
     mov     ax, [si]
-    mov     [sb_new_handler_off], ax
-    mov     ax, [si + 2]
-    mov     [sb_new_handler_seg], ax
+    mov     [ivt_new_off], ax
+    mov     ax, [si+2]
+    mov     [ivt_new_seg], ax
     mov     ax, [di]
-    mov     [sb_old_handler_off], ax
-    mov     ax, [di + 2]
-    mov     [sb_old_handler_seg], ax
-    pop     bx
-    pop     cx
+    mov     [ivt_old_off], ax
+    mov     ax, [di+2]
+    mov     [ivt_old_seg], ax
 
-    mov     si, str_sb_ivt_mod
-    call    _sb_log_violation
+    push    si
+    push    di
+    push    cx
+    mov     si, msg_ivt_mod
+    call    sb_log_violation
     inc     word [violation_count]
-    inc     word [ivt_mods_detected]
+    pop     cx
+    pop     di
+    pop     si
 
-    add     si, 4
-    add     di, 4
+    add     si, IVT_ENTRY_SIZE
+    add     di, IVT_ENTRY_SIZE
     inc     bx
-    loop    .check_vector
+    loop    .check
 
 .done:
     pop     ds
-    pop     es
     popa
     ret
 
-_sb_snapshot_registers:
-    mov     [reg_snap_ax], ax
-    mov     [reg_snap_bx], bx
-    mov     [reg_snap_cx], cx
-    mov     [reg_snap_dx], dx
-    mov     [reg_snap_si], si
-    mov     [reg_snap_di], di
-    mov     [reg_snap_bp], bp
-    mov     [reg_snap_sp], sp
-    mov     [reg_snap_ss], ss
-    mov     [reg_snap_ds], ds
-    mov     [reg_snap_es], es
+sb_snapshot_regs:
+    mov     [snap_ax], ax
+    mov     [snap_bx], bx
+    mov     [snap_cx], cx
+    mov     [snap_dx], dx
+    mov     [snap_si], si
+    mov     [snap_di], di
+    mov     [snap_bp], bp
+    mov     [snap_sp], sp
+    mov     [snap_ss], ss
+    mov     [snap_ds], ds
+    mov     [snap_es], es
     pushf
     pop     ax
-    mov     [reg_snap_flags], ax
+    mov     [snap_flags], ax
     ret
 
-_sb_check_register_state:
+sb_check_regs:
     pusha
+
     mov     ax, ss
-    cmp     ax, [reg_snap_ss]
-    jne     .ss_modified
+    cmp     ax, [snap_ss]
+    jne     .ss_bad
 
     mov     ax, ds
-    cmp     ax, [reg_snap_ds]
-    jne     .ds_modified
+    cmp     ax, [snap_ds]
+    jne     .ds_bad
 
     jmp     .done
 
-.ss_modified:
-    mov     si, str_sb_ss_changed
-    call    _sb_log_violation
+.ss_bad:
+    mov     si, msg_ss_changed
+    call    sb_log_violation
     inc     word [violation_count]
     jmp     .done
 
-.ds_modified:
-    mov     si, str_sb_ds_changed
-    call    _sb_log_violation
+.ds_bad:
+    mov     si, msg_ds_changed
+    call    sb_log_violation
     inc     word [violation_count]
 
 .done:
     popa
     ret
 
-_sb_record_exec_event:
+sb_record_event:
     pusha
 
-    mov     ax, [report_entry_count]
-    cmp     ax, REPORT_MAX_ENTRIES
+    mov     ax, [report_count]
+    cmp     ax, REPORT_MAX
     jge     .full
 
     mov     bx, REPORT_ENTRY_SIZE
     mul     bx
-    mov     di, report_buffer
+    mov     di, report_buf
     add     di, ax
 
     mov     ax, [exec_count]
     stosw
-
-    mov     al, [sb_payload_index]
+    mov     al, [payload_index]
     stosb
-
-    mov     al, [sb_payload_flags]
+    mov     al, [payload_flags]
     stosb
-
     mov     al, [active_policy]
     stosb
-
-    mov     al, [violation_count]
+    mov     ax, [violation_count]
+    stosw
+    mov     al, [policy_score]
     stosb
 
     inc     word [exec_count]
-    inc     word [report_entry_count]
+    inc     word [report_count]
 
 .full:
     popa
     ret
 
-_sb_update_policy_score:
+sb_update_score:
     pusha
     mov     al, [policy_score]
     mov     bx, [violation_count]
-    cmp     bx, 0
-    je      .no_violations
+    test    bx, bx
+    jz      .done
 
     cmp     bx, 5
-    jge     .heavy_penalty
+    jge     .heavy
 
     sub     al, 5
-    jmp     .update
+    jmp     .store
 
-.heavy_penalty:
-    sub     al, 15
+.heavy:
+    sub     al, 20
 
-.update:
-    jnc     .store
-    xor     al, al
 .store:
+    jnc     .save
+    xor     al, al
+.save:
     mov     [policy_score], al
 
-.no_violations:
+.done:
     popa
     ret
 
-_sb_log_policy_change:
-    pusha
-    mov     si, str_sb_policy_change
-    call    _sb_log_info
-    popa
-    ret
-
-_sb_log_violation:
+sb_log_violation:
     pusha
     push    ds
     push    es
@@ -528,31 +487,31 @@ _sb_log_violation:
     mov     ds, ax
     mov     es, ax
 
-    mov     ax, [sb_log_ptr]
-    cmp     ax, SB_LOG_MAX * SB_LOG_ENTRY
+    mov     ax, [log_ptr]
+    cmp     ax, LOG_MAX * LOG_ENTRY_SIZE
     jge     .full
 
-    mov     di, sb_log_buffer
+    mov     di, log_buf
     add     di, ax
 
     mov     byte [di], 0x01
     inc     di
 
-    mov     cx, SB_LOG_ENTRY - 2
+    mov     cx, LOG_ENTRY_SIZE - 2
 .copy:
     lodsb
     test    al, al
     jz      .pad
     stosb
     loop    .copy
-    jmp     .done
+    jmp     .term
 .pad:
     xor     al, al
     rep     stosb
-.done:
+.term:
     mov     byte [di], 0
-    add     word [sb_log_ptr], SB_LOG_ENTRY
-    inc     word [sb_log_count]
+    add     word [log_ptr], LOG_ENTRY_SIZE
+    inc     word [log_count]
 
 .full:
     pop     es
@@ -560,7 +519,7 @@ _sb_log_violation:
     popa
     ret
 
-_sb_log_info:
+sb_log_info:
     pusha
     push    ds
     push    es
@@ -569,31 +528,31 @@ _sb_log_info:
     mov     ds, ax
     mov     es, ax
 
-    mov     ax, [sb_log_ptr]
-    cmp     ax, SB_LOG_MAX * SB_LOG_ENTRY
+    mov     ax, [log_ptr]
+    cmp     ax, LOG_MAX * LOG_ENTRY_SIZE
     jge     .full
 
-    mov     di, sb_log_buffer
+    mov     di, log_buf
     add     di, ax
 
     mov     byte [di], 0x00
     inc     di
 
-    mov     cx, SB_LOG_ENTRY - 2
+    mov     cx, LOG_ENTRY_SIZE - 2
 .copy:
     lodsb
     test    al, al
     jz      .pad
     stosb
     loop    .copy
-    jmp     .done
+    jmp     .term
 .pad:
     xor     al, al
     rep     stosb
-.done:
+.term:
     mov     byte [di], 0
-    add     word [sb_log_ptr], SB_LOG_ENTRY
-    inc     word [sb_log_count]
+    add     word [log_ptr], LOG_ENTRY_SIZE
+    inc     word [log_count]
 
 .full:
     pop     es
@@ -601,81 +560,76 @@ _sb_log_info:
     popa
     ret
 
-_sb_clear_report:
+sb_clear_report:
     pusha
-    mov     di, report_buffer
-    mov     cx, REPORT_MAX_ENTRIES * REPORT_ENTRY_SIZE
+    mov     di, report_buf
+    mov     cx, REPORT_MAX * REPORT_ENTRY_SIZE
     xor     al, al
     rep     stosb
-    mov     word [report_entry_count], 0
+    mov     word [report_count], 0
     popa
     ret
 
-_sb_reset_hooks:
+sb_clear_log:
     pusha
-    mov     di, sb_log_buffer
-    mov     cx, SB_LOG_MAX * SB_LOG_ENTRY
+    mov     di, log_buf
+    mov     cx, LOG_MAX * LOG_ENTRY_SIZE
     xor     al, al
     rep     stosb
-    mov     word [sb_log_ptr], 0
-    mov     word [sb_log_count], 0
+    mov     word [log_ptr], 0
+    mov     word [log_count], 0
     popa
     ret
 
-SB_LOG_MAX              equ 64
-SB_LOG_ENTRY            equ 48
+active_policy       db POLICY_BLOCK_DANGER
+policy_score        db 100
+violation_count     dw 0
+exec_count          dw 0
+report_count        dw 0
+log_ptr             dw 0
+log_count           dw 0
 
-active_policy           db POLICY_BLOCK_DANGER
-policy_score            db 100
-violation_count         dw 0
-exec_count              dw 0
-ivt_mods_detected       dw 0
-report_entry_count      dw 0
-sb_log_ptr              dw 0
-sb_log_count            dw 0
+payload_flags       db 0
+payload_index       dw 0
+payload_exec_addr   dw SHELLCODE_BASE
 
-sb_payload_flags        db 0
-sb_payload_index        dw 0
-scan_flags              db 0
+ivt_vec_num         dw 0
+ivt_new_off         dw 0
+ivt_new_seg         dw 0
+ivt_old_off         dw 0
+ivt_old_seg         dw 0
 
-sb_modified_vector      dw 0
-sb_new_handler_off      dw 0
-sb_new_handler_seg      dw 0
-sb_old_handler_off      dw 0
-sb_old_handler_seg      dw 0
+snap_ax             dw 0
+snap_bx             dw 0
+snap_cx             dw 0
+snap_dx             dw 0
+snap_si             dw 0
+snap_di             dw 0
+snap_bp             dw 0
+snap_sp             dw 0
+snap_ss             dw 0
+snap_ds             dw 0
+snap_es             dw 0
+snap_flags          dw 0
 
-reg_snap_ax             dw 0
-reg_snap_bx             dw 0
-reg_snap_cx             dw 0
-reg_snap_dx             dw 0
-reg_snap_si             dw 0
-reg_snap_di             dw 0
-reg_snap_bp             dw 0
-reg_snap_sp             dw 0
-reg_snap_ss             dw 0
-reg_snap_ds             dw 0
-reg_snap_es             dw 0
-reg_snap_flags          dw 0
+ivt_snap            times IVT_ENTRY_COUNT * IVT_ENTRY_SIZE db 0
+report_buf          times REPORT_MAX * REPORT_ENTRY_SIZE db 0
+log_buf             times LOG_MAX * LOG_ENTRY_SIZE db 0
 
-ivt_snapshot            times 256 * 4 db 0
-report_buffer           times REPORT_MAX_ENTRIES * REPORT_ENTRY_SIZE db 0
-sb_log_buffer           times SB_LOG_MAX * SB_LOG_ENTRY db 0
-
-str_sb_blocked_danger   db "[SANDBOX:BLOCK] Payload flagged DANGEROUS -- policy BLOCK_DANGER active", 0
-str_sb_lockdown         db "[SANDBOX:BLOCK] Execution denied -- LOCKDOWN policy active", 0
-str_sb_out_of_bounds    db "[SANDBOX:BLOCK] Payload origin outside permitted exec region", 0
-str_sb_bad_opcode       db "[SANDBOX:BLOCK] Privileged/unsafe opcode detected in payload", 0
-str_sb_audit_pass       db "[SANDBOX:AUDIT] Execution permitted -- audit-only policy", 0
-str_sb_ivt_mod          db "[SANDBOX:ALERT] IVT vector modified after execution", 0
-str_sb_ss_changed       db "[SANDBOX:ALERT] Stack segment modified by payload", 0
-str_sb_ds_changed       db "[SANDBOX:ALERT] Data segment modified by payload", 0
-str_sb_scan_io          db "[SANDBOX:SCAN]  I/O port access opcode detected (IN/OUT)", 0
-str_sb_scan_cli         db "[SANDBOX:SCAN]  CLI instruction detected (interrupt disable)", 0
-str_sb_scan_priv        db "[SANDBOX:BLOCK] Privileged MSR/system opcode in payload", 0
-str_sb_scan_wbinvd      db "[SANDBOX:BLOCK] WBINVD cache flush instruction detected", 0
-str_sb_scan_int13       db "[SANDBOX:SCAN]  INT 13h disk access in payload", 0
-str_sb_scan_rtc         db "[SANDBOX:SCAN]  INT 1Ah RTC access in payload", 0
-str_sb_scan_e820        db "[SANDBOX:SCAN]  INT 15h extended memory query detected", 0
-str_sb_policy_change    db "[SANDBOX:POLICY] Active enforcement policy updated", 0
+msg_blocked_danger  db "[SANDBOX:BLOCK] Payload flagged DANGEROUS -- BLOCK_DANGER active", 0
+msg_lockdown        db "[SANDBOX:BLOCK] Execution denied -- LOCKDOWN policy active", 0
+msg_oob             db "[SANDBOX:BLOCK] Payload address outside permitted exec region", 0
+msg_bad_opcode      db "[SANDBOX:BLOCK] Privileged opcode detected in payload scan", 0
+msg_audit_pass      db "[SANDBOX:AUDIT] Execution permitted under audit-only policy", 0
+msg_ivt_mod         db "[SANDBOX:ALERT] IVT vector modified after payload execution", 0
+msg_ss_changed      db "[SANDBOX:ALERT] Stack segment register modified by payload", 0
+msg_ds_changed      db "[SANDBOX:ALERT] Data segment register modified by payload", 0
+msg_scan_io         db "[SANDBOX:SCAN]  IN/OUT port access opcode detected", 0
+msg_scan_cli        db "[SANDBOX:SCAN]  CLI instruction detected (interrupt disable)", 0
+msg_scan_priv       db "[SANDBOX:BLOCK] Privileged system opcode in payload (MSR/WBINVD)", 0
+msg_scan_int13      db "[SANDBOX:SCAN]  INT 13h disk BIOS call detected", 0
+msg_scan_rtc        db "[SANDBOX:SCAN]  INT 1Ah RTC BIOS call detected", 0
+msg_scan_e820       db "[SANDBOX:SCAN]  INT 15h memory query detected", 0
+msg_policy_updated  db "[SANDBOX:POLICY] Enforcement policy updated", 0
 
 times 4096 - ($ - $$) db 0
