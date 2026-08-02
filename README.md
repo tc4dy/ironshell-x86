@@ -8,19 +8,24 @@
 [![Language](https://img.shields.io/badge/language-NASM%20Assembly-red)]()
 [![Mode](https://img.shields.io/badge/mode-Ring%200%20%2F%20Real%20Mode-critical)]()
 [![Sandbox](https://img.shields.io/badge/sandbox-4%20policy%20levels-orange)]()
-[![Payloads](https://img.shields.io/badge/payloads-7%20injectable%20modules-purple)]()
+[![Payloads](https://img.shields.io/badge/payloads-8%20injectable%20modules-purple)]()
 [![Boot](https://img.shields.io/badge/boot-MBR%20%2B%202--Stage%20Loader-blueviolet)]()
+[![Themes](https://img.shields.io/badge/themes-5%20color%20themes-brightgreen)]()
+[![Filters](https://img.shields.io/badge/log%20filters-6%20modes-yellow)]()
 
 ---
 
 ## ✨ Features
 
-- 🥾 **2-Stage Bootloader** — Stage 1 MBR loads Stage 2 + Sandbox + Shellcode from disk with retry logic
-- 🖥️ **TUI Shell** — Full interactive terminal UI with dual-panel VGA layout, command history (↑↓), and live execution log
-- 💉 **7 Injectable Payloads** — MSGBOX, MEMWALK, PORTPROBE, STACKSMASH, NXPROBE, CPUINFO, IVTDUMP
-- 🛡️ **Sandbox Layer** — 4 enforcement policies, pre-execution opcode scanning, IVT snapshot diffing, register integrity checks
-- 🔬 **Hardware Analysis** — CPUID vendor/brand/feature detection, A20 gate test, conventional memory sizing
-- ⚙️ **Clean Build System** — NASM + QEMU Makefile with GDB debug stub, ndisasm disassembly, and hard binary size validation
+- 🥾 **2-Stage Bootloader** — Stage 1 MBR loads Stage 2 + Sandbox + Shellcode + Theme + Filter modules from disk with retry logic
+- 🖥️ **TUI Shell** — Full interactive terminal UI with dual-panel VGA layout, command history (↑↓), page scroll (PgUp/PgDn), and live execution log
+- 💉 **8 Injectable Payloads** — MSGBOX, MEMWALK, PORTPROBE, STACKSMASH, NXPROBE, CPUINFO, IVTDUMP, MEMMAP
+- 🛡️ **Sandbox v2.1** — 4 enforcement policies, pre-execution opcode scanning (STI/HLT/IO/PRIV), IVT snapshot diffing with auto-restore, register integrity checks, CPUID support detection
+- 🎨 **Theme Engine** — 5 color themes (COLOR, MONO, HACKER, RETRO, STEALTH) loaded as a separate module at 0xB000
+- 🔍 **Log Filter System** — 6 filter modes (ALL, INFO, WARN, ERROR, SUCCESS, ACCENT) loaded as a separate module at 0xC000
+- 🔬 **Hardware Analysis** — CPUID vendor/brand/feature detection, A20 gate test, E820 memory map, conventional memory sizing
+- 🧰 **Error Tracking** — Typed error codes with descriptions, per-session error history via `errors` command
+- ⚙️ **Clean Build System** — NASM + QEMU Makefile with GDB debug stub, ndisasm disassembly, and hard binary size validation for all 5 modules
 
 ---
 
@@ -74,15 +79,20 @@ Once booted in QEMU, the interactive shell accepts:
 | Command | Description |
 |---|---|
 | `list` | List all available payloads with index and risk flag |
-| `sel <n>` | Select a payload by index number |
-| `run` | Execute the currently selected payload |
+| `sel <n> [arg]` | Select a payload by index; optional runtime argument |
+| `run` | Execute the currently selected payload through the sandbox |
 | `sandbox` | Re-run all sandbox environment checks |
 | `dump <hex>` | Hexdump 32 bytes at a given memory address |
 | `info` | Display system memory layout and load addresses |
 | `clear` | Clear the execution log panel |
+| `theme <1-5>` | Apply a color theme |
+| `themes` | List all available color themes |
+| `filter <0-5>` | Set log output filter by color category |
+| `filters` | List all available filter modes |
+| `errors` | Display last error code and description |
 | `help` | Show full command reference |
 
-> **Tip:** Use ↑ / ↓ arrow keys to navigate command history during input.
+> **Tip:** Use ↑ / ↓ arrow keys to navigate command history. Use PgUp / PgDn to scroll the execution log panel.
 
 ---
 
@@ -94,13 +104,65 @@ Once booted in QEMU, the interactive shell accepts:
 | 1 | `MEMWALK` | Walks and dumps the BIOS Data Area (0x0400+) | ✅ Safe |
 | 2 | `PORTPROBE` | Samples 8 I/O ports starting at 0x03F8 via `IN` | ✅ Safe |
 | 3 | `STACKSMASH` | Writes canary pattern to stack and verifies integrity | ⚠️ Caution |
-| 4 | `NXPROBE` | Tests NX/DEP enforcement by executing a RET stub | ✅ Safe |
+| 4 | `NXPROBE` | Tests NX/DEP enforcement by executing a RET stub at 0xA000 | ✅ Safe |
 | 5 | `CPUINFO` | Full CPUID enumeration — vendor, brand, stepping, SSE/AVX | ✅ Safe |
-| 6 | `IVTDUMP` | Dumps the first 16 Interrupt Vector Table entries (INT 0–15) | ✅ Safe |
+| 6 | `IVTDUMP` | Dumps N Interrupt Vector Table entries; default 16 (INT 0–15) | ✅ Safe |
+| 7 | `MEMMAP` | Queries E820 system memory map via INT 15h; falls back to INT 12h | ✅ Safe |
+
+**Payload arguments** — use `sel <n> <arg>` before `run`:
+
+| Payload | Argument | Example |
+|---|---|---|
+| `PORTPROBE` | Starting I/O port (hex) | `sel 2 03F8` |
+| `STACKSMASH` | Canary depth (decimal, 1–16) | `sel 3 8` |
+| `IVTDUMP` | Entry count (decimal, 1–256) | `sel 6 32` |
 
 ---
 
-## 🛡️ Sandbox Policies
+## 🎨 Theme System
+
+5 built-in color themes, switchable live without reboot:
+
+| # | Name | Description |
+|---|---|---|
+| 1 | `COLOR` | Full 16-color CGA palette (default) |
+| 2 | `MONO` | Monochrome white-on-black |
+| 3 | `HACKER` | Green phosphor terminal |
+| 4 | `RETRO` | Amber CRT display |
+| 5 | `STEALTH` | Near-invisible dark mode |
+
+```
+theme 3       # Switch to hacker green
+themes        # List all themes
+```
+
+The theme engine loads as a standalone module at **0xB000**. All 10 UI color slots (normal, bright, success, error, warn, accent, dim, selected, title, status) are remapped on theme change and the entire screen is redrawn immediately.
+
+---
+
+## 🔍 Log Filter System
+
+6 filter modes to control what the log panel shows:
+
+| # | Name | Shows |
+|---|---|---|
+| 0 | `ALL` | All log entries (default) |
+| 1 | `INFO` | Dim and accent entries only |
+| 2 | `WARN` | Warning entries only |
+| 3 | `ERROR` | Error entries only |
+| 4 | `SUCCESS` | Success entries only |
+| 5 | `ACCENT` | Accent-colored entries only |
+
+```
+filter 3      # Show errors only
+filters       # List all filter modes
+```
+
+The filter engine loads as a standalone module at **0xC000**. Filtering is applied at render time — all log entries are preserved in the buffer regardless of the active filter.
+
+---
+
+## 🛡️ Sandbox v2.1
 
 The sandbox module (`sandbox.asm`) loads at `0x9000` and enforces one of four active policies:
 
@@ -111,12 +173,18 @@ The sandbox module (`sandbox.asm`) loads at `0x9000` and enforces one of four ac
 | `POLICY_AUDIT_ONLY` | `0x02` | All payloads execute; violations are logged only |
 | `POLICY_LOCKDOWN` | `0x03` | No execution permitted under any condition |
 
-Pre-execution analysis includes:
+Pre-execution analysis (v2.1) includes:
 
-- **Opcode scanning** — detects `IN`/`OUT`, `CLI`, `WBINVD`, `RDMSR`/`WRMSR` across 128 bytes of payload (doubled from v1)
-- **IVT diffing** — compares all 256 interrupt vector table entries before and after execution
-- **Register integrity** — verifies `SS`, `DS`, and segment state post-execution
-- **Bounds check** — confirms payload origin is within `0xA000–0xAFFF`
+- **CPUID detection** — verifies CPU supports CPUID before any feature query
+- **Opcode scanning** — detects `IN`/`OUT`, `CLI`, `STI`, `HLT`, `WBINVD`, `RDMSR`/`WRMSR` across 128 bytes of payload
+- **HLT blocking** — payloads containing `HLT (0xF4)` are hard-blocked regardless of policy (system freeze risk)
+- **Privileged prefix blocking** — `0x0F 0x01`, `0x0F 0x09`, `0x0F 0x30`, `0x0F 0x32` are blocked (LGDT/WBINVD/WRMSR/RDMSR)
+- **IVT snapshot + auto-restore** — all 256 IVT entries are snapshotted before execution; any vector modified by the payload is automatically restored after, and the modification is logged
+- **Register integrity** — verifies `SS` and `DS` segment state post-execution; violations increment the policy score penalty
+- **Bounds check** — confirms payload dispatch address is within `0xA000–0xAFFF`
+- **Policy scoring** — a 0–100 score tracks cumulative violation weight across the session
+
+Every payload passes through `sandbox_entry` before dispatch and `sandbox_post_exec` after return. The sandbox is never bypassed.
 
 ---
 
@@ -125,12 +193,36 @@ Pre-execution analysis includes:
 ```
 0x0000 – 0x03FF   Interrupt Vector Table (IVT)
 0x0400 – 0x04FF   BIOS Data Area (BDA)
-0x7C00 – 0x7DFF   loader.asm    Stage 1 MBR bootloader      (512 bytes)
-0x7E00 – 0x8FFF   stage2.asm    Execution engine + TUI shell (12 sectors)
-0x9000 – 0x9FFF   sandbox.asm   Protection & analysis layer  (8 sectors)
-0xA000 – 0xAFFF   [EXEC]        Shellcode injection target
-0xB800 – 0xBFFF   VGA Text Memory (80x25, mode 0x03)
+0x7C00 – 0x7DFF   loader.asm     Stage 1 MBR bootloader        (512 bytes,  1 sector)
+0x7E00 – 0x8FFF   stage2.asm     Execution engine + TUI shell  (6144 bytes, 12 sectors)
+0x9000 – 0x9FFF   sandbox.asm    Protection & analysis layer   (4096 bytes,  8 sectors)
+0xA000 – 0xAFFF   [EXEC]         Shellcode injection target
+0xB000 – 0xB3FF   theme.asm      Theme engine                  (1024 bytes,  2 sectors)
+0xC000 – 0xC3FF   filter.asm     Log filter module             (1024 bytes,  2 sectors)
+0xB800 – 0xBFFF   VGA Text Memory (80×25, mode 0x03)
 ```
+
+> **Note:** The theme module at 0xB000 and VGA text buffer at 0xB800 are in the same physical segment space. Module data is accessed as flat 16-bit offsets from DS=0x0000, so `0x0000:0xB000` (theme) and `0xB800:0x0000` (VGA segment) resolve to different physical addresses and do not overlap.
+
+---
+
+## 🧰 Error Codes
+
+The `errors` command shows the last typed error code and a plain-text description:
+
+| Code | Name | Description |
+|---|---|---|
+| `0x00` | `ERR_NONE` | No error |
+| `0x01` | `ERR_DISK` | Disk read failure during load |
+| `0x02` | `ERR_BOUNDS` | Address outside permitted range |
+| `0x03` | `ERR_SANDBOX_BLOCK` | Sandbox blocked execution |
+| `0x04` | `ERR_BAD_ARG` | Invalid command argument |
+| `0x05` | `ERR_OOB` | Index out of range |
+| `0x06` | `ERR_NO_PAYLOAD` | No payload selected |
+| `0x07` | `ERR_BAD_ADDR` | Invalid hex address for dump |
+| `0x08` | `ERR_THEME_INVALID` | Theme index out of range (1–5) |
+| `0x09` | `ERR_FILTER_INVALID` | Filter index out of range (0–5) |
+| `0x0A` | `ERR_E820_FAIL` | E820 INT 15h memory query failed |
 
 ---
 
@@ -150,7 +242,7 @@ gdb
 (gdb) continue
 ```
 
-Step through the MBR byte by byte, inspect registers, and trace the full boot sequence.
+Step through the MBR byte by byte, inspect registers, and trace the full boot sequence. Stage 2 entry is at `0x7E00`; sandbox entry is at `0x9000`.
 
 ---
 
@@ -158,7 +250,7 @@ Step through the MBR byte by byte, inspect registers, and trace the full boot se
 
 - `nasm` — Netwide Assembler
 - `qemu-system-i386` — x86 system emulator
-- `ndisasm` *(optional)* — for `make disasm`, included with NASM
+- `ndisasm` — for `make disasm`, included with NASM package
 
 ---
 
@@ -166,8 +258,36 @@ Step through the MBR byte by byte, inspect registers, and trace the full boot se
 
 ```
 ironshell-x86/
-├── loader.asm      Stage 1 MBR — disk loader, VGA boot UI
-├── stage2.asm      Execution engine, TUI shell, payloads
-├── sandbox.asm     Protection layer, policy engine, IVT diffing
-└── Makefile        Build, run, debug, disasm targets
+├── loader.asm      Stage 1 MBR — disk loader, VGA boot UI, retry logic
+├── stage2.asm      Execution engine, TUI shell, 8 payloads, theme/filter integration
+├── sandbox.asm     Protection layer v2.1 — policy engine, opcode scan, IVT diff+restore
+├── theme.asm       Theme engine — 5 themes, 10-slot color table, live redraw
+├── filter.asm      Log filter module — 6 filter modes, color-category matching
+└── Makefile        Build, run, debug, disasm targets with size validation
 ```
+
+---
+
+## 📋 Version History
+
+**v2.1** — current
+- Added `theme.asm` module (0xB000): 5 color themes, live screen redraw
+- Added `filter.asm` module (0xC000): 6 log filter modes, render-time filtering
+- Added `MEMMAP` payload (E820 memory map via INT 15h with INT 12h fallback)
+- Sandbox: IVT auto-restore, STI/HLT detection, CPUID guard, policy scoring
+- New commands: `theme`, `themes`, `filter`, `filters`, `errors`
+- Payload arguments: `sel <n> <arg>` passes runtime args to PORTPROBE, STACKSMASH, IVTDUMP
+- Error tracking: typed error codes with `errors` command
+- Log scroll: PgUp/PgDn navigation in the log panel
+- Fixed: sandbox bypass in `exec_payload` — all payloads now route through `sandbox_entry`
+- Fixed: `payload_memwalk` stack corruption (double BX increment)
+- Fixed: `sb_pre_exec` policy logic (`jge` → correct allow/block ordering)
+- Fixed: `hist_prev` scasb using wrong DI after movsb
+- Fixed: `format_payload_line` invalid NASM multi-operand `mov`
+- Fixed: E820 entry stride inconsistency (20 vs 24 bytes)
+- Fixed: stage2/sandbox memory overlap (stage2 padded to 6144, sandbox at 0x9000 — gap enforced by layout)
+- Fixed: `strcpy_bounded_name` double null write
+- Fixed: `vga_draw_banner` box-drawing character sequence
+
+**v1.0** — initial release
+- 2-stage bootloader, 7 payloads, basic sandbox with 4 policies
