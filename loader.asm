@@ -16,6 +16,16 @@ SHELLCODE_OFF           equ 0xA000
 SHELLCODE_LBA           equ 22
 SHELLCODE_SECTORS       equ 4
 
+THEME_SEG               equ 0x0000
+THEME_OFF               equ 0xB000
+THEME_LBA               equ 26
+THEME_SECTORS           equ 2
+
+FILTER_SEG              equ 0x0000
+FILTER_OFF              equ 0xC000
+FILTER_LBA              equ 28
+FILTER_SECTORS          equ 2
+
 DISK_RETRIES            equ 5
 VGA_SEG                 equ 0xB800
 SCREEN_COLS             equ 80
@@ -83,6 +93,26 @@ boot_entry:
     mov     bx, SHELLCODE_OFF
     mov     cx, SHELLCODE_SECTORS
     mov     dx, SHELLCODE_LBA
+    call    disk_load
+    jc      fatal_disk
+
+    mov     si, msg_load_theme
+    mov     bl, COL_OK
+    call    status_writeln
+    mov     ax, THEME_SEG
+    mov     bx, THEME_OFF
+    mov     cx, THEME_SECTORS
+    mov     dx, THEME_LBA
+    call    disk_load
+    jc      fatal_disk
+
+    mov     si, msg_load_filter
+    mov     bl, COL_OK
+    call    status_writeln
+    mov     ax, FILTER_SEG
+    mov     bx, FILTER_OFF
+    mov     cx, FILTER_SECTORS
+    mov     dx, FILTER_LBA
     call    disk_load
     jc      fatal_disk
 
@@ -214,14 +244,13 @@ vga_draw_banner:
     call    vga_puts
 
     mov     di, (2 * SCREEN_COLS * 2)
-    mov     cx, SCREEN_COLS
+    mov     ax, (COL_DIM << 8) | 0xC9
+    stosw
+
+    mov     cx, SCREEN_COLS - 2
     mov     ax, (COL_DIM << 8) | 0xCD
     rep     stosw
 
-    mov     di, (2 * SCREEN_COLS * 2)
-    mov     ax, (COL_DIM << 8) | 0xC9
-    stosw
-    mov     di, (2 * SCREEN_COLS + 79) * 2
     mov     ax, (COL_DIM << 8) | 0xBB
     stosw
 
@@ -265,8 +294,10 @@ status_writeln:
     mov     ax, VGA_SEG
     mov     es, ax
 
-    movzx   ax, byte [status_row]
-    imul    ax, ax, SCREEN_COLS
+    xor     ax, ax
+    mov     al, [status_row]
+    mov     bx, SCREEN_COLS
+    mul     bx
     add     ax, 42
     shl     ax, 1
     mov     di, ax
@@ -342,13 +373,15 @@ chs_cyl         dw 0
 chs_head        db 0
 chs_sect        db 0
 
-str_banner      db "  SX-SANDBOX  |  SHELLCODE EXECUTION ENVIRONMENT  |  v2.0  |  x86 BARE-METAL", 0
-str_banner_sub  db "Loader v2.0  >>  Initializing subsystems...", 0
+str_banner      db "  SX-SANDBOX  |  SHELLCODE EXECUTION ENVIRONMENT  |  v2.1  |  x86 BARE-METAL", 0
+str_banner_sub  db "Loader v2.1  >>  Initializing subsystems...", 0
 str_progress    db "LOADING  [", 0
 
 msg_load_stage2 db "[*] Loading execution engine (stage2)...", 0
 msg_load_sandbox db "[*] Loading sandbox protection layer...", 0
 msg_load_shell  db "[*] Staging shellcode payloads...", 0
+msg_load_theme  db "[*] Loading theme engine...", 0
+msg_load_filter db "[*] Loading log filter module...", 0
 msg_launch      db "[+] All modules verified. Transferring control...", 0
 msg_disk_err    db "[!] FATAL: Disk read failure. Sector unreadable.", 0
 msg_halt        db "    System halted. Press RESET to restart.", 0
