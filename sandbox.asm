@@ -1,4 +1,3 @@
-
 BITS 16
 ORG 0x9000
 
@@ -68,7 +67,7 @@ sandbox_post_exec:
     mov     ds, ax
     mov     es, ax
 
-    call    sb_diff_ivt
+    call    sb_diff_ivt_restore
     call    sb_check_regs
     call    sb_record_event
     call    sb_update_score
@@ -124,8 +123,13 @@ sb_pre_exec:
     test    al, EXEC_FLAG_DANGEROUS
     jz      .bounds
 
+    cmp     byte [active_policy], POLICY_ALLOW_ALL
+    je      .bounds
+
     cmp     byte [active_policy], POLICY_BLOCK_DANGER
-    jge     .dangerous
+    je      .dangerous
+
+    jmp     .bounds
 
 .bounds:
     call    sb_check_bounds
@@ -211,6 +215,10 @@ sb_scan_opcodes:
     je      .io
     cmp     al, 0xFA
     je      .cli_insn
+    cmp     al, 0xFB
+    je      .sti_insn
+    cmp     al, 0xF4
+    je      .hlt_insn
     cmp     al, 0x0F
     je      .prefix_0f
     cmp     al, 0xCD
@@ -255,33 +263,54 @@ sb_scan_opcodes:
     jmp     .clean
 
 .io:
+    push    si
     mov     si, msg_scan_io
     call    sb_log_info
-    xor     si, si
+    pop     si
     jmp     .clean
 
 .cli_insn:
+    push    si
     mov     si, msg_scan_cli
     call    sb_log_info
-    xor     si, si
+    pop     si
     jmp     .clean
 
+.sti_insn:
+    push    si
+    mov     si, msg_scan_sti
+    call    sb_log_info
+    pop     si
+    jmp     .clean
+
+.hlt_insn:
+    mov     si, msg_scan_hlt
+    call    sb_log_violation
+    pop     cx
+    pop     si
+    pop     es
+    stc
+    ret
+
 .int13:
+    push    si
     mov     si, msg_scan_int13
     call    sb_log_info
-    xor     si, si
+    pop     si
     jmp     .clean
 
 .int1a:
+    push    si
     mov     si, msg_scan_rtc
     call    sb_log_info
-    xor     si, si
+    pop     si
     jmp     .clean
 
 .int15:
+    push    si
     mov     si, msg_scan_e820
     call    sb_log_info
-    xor     si, si
+    pop     si
     jmp     .clean
 
 .priv:
@@ -309,7 +338,7 @@ sb_snapshot_ivt:
     mov     ds, ax
     mov     es, ax
 
-    mov     si, 0x0000
+    xor     si, si
     mov     di, ivt_snap
     mov     cx, IVT_ENTRY_COUNT * 2
     rep     movsw
@@ -319,14 +348,14 @@ sb_snapshot_ivt:
     popa
     ret
 
-sb_diff_ivt:
+sb_diff_ivt_restore:
     pusha
     push    ds
 
     xor     ax, ax
     mov     ds, ax
 
-    mov     si, 0x0000
+    xor     si, si
     mov     di, ivt_snap
     mov     cx, IVT_ENTRY_COUNT
     xor     bx, bx
@@ -337,12 +366,7 @@ sb_diff_ivt:
     jne     .modified
     mov     ax, [si+2]
     cmp     ax, [di+2]
-    jne     .modified
-    add     si, IVT_ENTRY_SIZE
-    add     di, IVT_ENTRY_SIZE
-    inc     bx
-    loop    .check
-    jmp     .done
+    je      .next_entry
 
 .modified:
     mov     [ivt_vec_num], bx
@@ -355,22 +379,29 @@ sb_diff_ivt:
     mov     ax, [di+2]
     mov     [ivt_old_seg], ax
 
+    mov     ax, [di]
+    mov     [si], ax
+    mov     ax, [di+2]
+    mov     [si+2], ax
+
     push    si
     push    di
     push    cx
-    mov     si, msg_ivt_mod
+    push    bx
+    mov     si, msg_ivt_restored
     call    sb_log_violation
     inc     word [violation_count]
+    pop     bx
     pop     cx
     pop     di
     pop     si
 
+.next_entry:
     add     si, IVT_ENTRY_SIZE
     add     di, IVT_ENTRY_SIZE
     inc     bx
     loop    .check
 
-.done:
     pop     ds
     popa
     ret
@@ -621,11 +652,13 @@ msg_lockdown        db "[SANDBOX:BLOCK] Execution denied -- LOCKDOWN policy acti
 msg_oob             db "[SANDBOX:BLOCK] Payload address outside permitted exec region", 0
 msg_bad_opcode      db "[SANDBOX:BLOCK] Privileged opcode detected in payload scan", 0
 msg_audit_pass      db "[SANDBOX:AUDIT] Execution permitted under audit-only policy", 0
-msg_ivt_mod         db "[SANDBOX:ALERT] IVT vector modified after payload execution", 0
+msg_ivt_restored    db "[SANDBOX:RESTORE] IVT vector modified -- auto-restored to snapshot", 0
 msg_ss_changed      db "[SANDBOX:ALERT] Stack segment register modified by payload", 0
 msg_ds_changed      db "[SANDBOX:ALERT] Data segment register modified by payload", 0
 msg_scan_io         db "[SANDBOX:SCAN]  IN/OUT port access opcode detected", 0
 msg_scan_cli        db "[SANDBOX:SCAN]  CLI instruction detected (interrupt disable)", 0
+msg_scan_sti        db "[SANDBOX:SCAN]  STI instruction detected (interrupt enable)", 0
+msg_scan_hlt        db "[SANDBOX:BLOCK] HLT instruction detected -- system freeze risk", 0
 msg_scan_priv       db "[SANDBOX:BLOCK] Privileged system opcode in payload (MSR/WBINVD)", 0
 msg_scan_int13      db "[SANDBOX:SCAN]  INT 13h disk BIOS call detected", 0
 msg_scan_rtc        db "[SANDBOX:SCAN]  INT 1Ah RTC BIOS call detected", 0
