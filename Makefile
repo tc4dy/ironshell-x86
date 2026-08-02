@@ -20,7 +20,7 @@ SANDBOX_MAX_BYTES := 4096
 
 QEMU_BASE := -drive format=raw,file=$(IMAGE) \
              -m 4M \
-             -cpu 486 \
+             -cpu pentium \
              -no-reboot \
              -no-shutdown
 
@@ -44,7 +44,7 @@ $(IMAGE): $(LOADER) $(STAGE2) $(SANDBOX)
 	@$(DD) if=$(SANDBOX) of=$(IMAGE) bs=512 seek=$(SANDBOX_SECTOR) conv=notrunc status=none
 	@printf '  [OK]  Disk image ready.\n'
 
-$(LOADER): loader.asm
+$(LOADER): stage1.asm
 	@printf '  [ASM] %s\n' "$<"
 	@$(NASM) -f bin -o $@ $<
 	@SIZE=$$(wc -c < $@); \
@@ -98,7 +98,8 @@ check:
 	@command -v $(NASM)    >/dev/null 2>&1 || { printf '  [ERR] nasm not found\n';            exit 1; }
 	@command -v $(QEMU)    >/dev/null 2>&1 || { printf '  [ERR] qemu-system-i386 not found\n'; exit 1; }
 	@command -v $(DD)      >/dev/null 2>&1 || { printf '  [ERR] dd not found\n';              exit 1; }
-	@printf '  [OK]  Tools: nasm qemu-system-i386 dd\n'
+	@command -v $(NDISASM) >/dev/null 2>&1 || { printf '  [ERR] ndisasm not found\n';         exit 1; }
+	@printf '  [OK]  Tools: nasm qemu-system-i386 dd ndisasm\n'
 
 clean:
 	@rm -f $(LOADER) $(STAGE2) $(SANDBOX) $(IMAGE)
@@ -114,7 +115,7 @@ help:
 	@printf '  make disasm    Disassemble all binaries (ndisasm)\n'
 	@printf '  make clean     Remove build artifacts\n'
 	@printf '\n  Memory Layout:\n'
-	@printf '  0x7C00  loader.asm   MBR stage1 (512 bytes, sector 0)\n'
+	@printf '  0x7C00  stage1.asm   MBR stage1 (512 bytes, sector 0)\n'
 	@printf '  0x7E00  stage2.asm   Shell + engine (12 sectors, sector 2)\n'
 	@printf '  0x9000  sandbox.asm  Protection layer (8 sectors, sector 14)\n'
 	@printf '  0xA000  shellcode    Runtime injection target\n'
