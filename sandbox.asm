@@ -665,4 +665,4 @@ msg_scan_rtc        db "[SANDBOX:SCAN]  INT 1Ah RTC BIOS call detected", 0
 msg_scan_e820       db "[SANDBOX:SCAN]  INT 15h memory query detected", 0
 msg_policy_updated  db "[SANDBOX:POLICY] Enforcement policy updated", 0
 
-times 4096 - ($ - $$) db 0
+times 8192 - ($ - $$) db 0
