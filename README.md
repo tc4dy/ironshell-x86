@@ -272,7 +272,7 @@ ironshell-x86/
 
 ## 📋 Version History
 
-**v2.1** — current
+**v2.1.5** — current
 
 **New Features:**
 
