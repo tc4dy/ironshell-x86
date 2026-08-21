@@ -9,14 +9,20 @@ SECTORS  := 2880
 LOADER   := loader.bin
 STAGE2   := stage2.bin
 SANDBOX  := sandbox.bin
+THEME    := theme.bin
+FILTER   := filter.bin
 
 LOADER_SECTOR   := 0
 STAGE2_SECTOR   := 2
 SANDBOX_SECTOR  := 14
+THEME_SECTOR    := 26
+FILTER_SECTOR   := 28
 
 LOADER_MAX_BYTES  := 512
 STAGE2_MAX_BYTES  := 6144
 SANDBOX_MAX_BYTES := 4096
+THEME_MAX_BYTES   := 1024
+FILTER_MAX_BYTES  := 1024
 
 QEMU_BASE := -drive format=raw,file=$(IMAGE) \
              -m 4M \
@@ -33,7 +39,7 @@ QEMU_DEBUG  := $(QEMU_BASE) -display curses -s -S
 all: check $(IMAGE)
 	@printf '\n  Build complete: %s\n  Run: make run\n\n' "$(IMAGE)"
 
-$(IMAGE): $(LOADER) $(STAGE2) $(SANDBOX)
+$(IMAGE): $(LOADER) $(STAGE2) $(SANDBOX) $(THEME) $(FILTER)
 	@printf '  [IMG] Creating blank disk (%d sectors)...\n' $(SECTORS)
 	@$(DD) if=/dev/zero of=$(IMAGE) bs=512 count=$(SECTORS) status=none
 	@printf '  [IMG] Writing %-8s -> sector %d\n' "$(LOADER)"  $(LOADER_SECTOR)
@@ -42,9 +48,13 @@ $(IMAGE): $(LOADER) $(STAGE2) $(SANDBOX)
 	@$(DD) if=$(STAGE2)  of=$(IMAGE) bs=512 seek=$(STAGE2_SECTOR)  conv=notrunc status=none
 	@printf '  [IMG] Writing %-8s -> sector %d\n' "$(SANDBOX)" $(SANDBOX_SECTOR)
 	@$(DD) if=$(SANDBOX) of=$(IMAGE) bs=512 seek=$(SANDBOX_SECTOR) conv=notrunc status=none
+	@printf '  [IMG] Writing %-8s -> sector %d\n' "$(THEME)" $(THEME_SECTOR)
+	@$(DD) if=$(THEME) of=$(IMAGE) bs=512 seek=$(THEME_SECTOR) conv=notrunc status=none
+	@printf '  [IMG] Writing %-8s -> sector %d\n' "$(FILTER)" $(FILTER_SECTOR)
+	@$(DD) if=$(FILTER) of=$(IMAGE) bs=512 seek=$(FILTER_SECTOR) conv=notrunc status=none
 	@printf '  [OK]  Disk image ready.\n'
 
-$(LOADER): stage1.asm
+$(LOADER): loader.asm
 	@printf '  [ASM] %s\n' "$<"
 	@$(NASM) -f bin -o $@ $<
 	@SIZE=$$(wc -c < $@); \
@@ -71,6 +81,26 @@ $(SANDBOX): sandbox.asm
 	  printf '  [OK]  %-12s %d bytes (%d sectors)\n' "$@" $$SIZE $$((SIZE / 512)); \
 	  if [ $$SIZE -gt $(SANDBOX_MAX_BYTES) ]; then \
 	    printf '  [ERR] %s exceeds %d byte reservation\n' "$@" $(SANDBOX_MAX_BYTES); \
+	    rm -f $@; exit 1; \
+	  fi
+
+$(THEME): theme.asm
+	@printf '  [ASM] %s\n' "$<"
+	@$(NASM) -f bin -o $@ $<
+	@SIZE=$$(wc -c < $@); \
+	  printf '  [OK]  %-12s %d bytes (%d sectors)\n' "$@" $$SIZE $$((SIZE / 512)); \
+	  if [ $$SIZE -gt $(THEME_MAX_BYTES) ]; then \
+	    printf '  [ERR] %s exceeds %d byte reservation\n' "$@" $(THEME_MAX_BYTES); \
+	    rm -f $@; exit 1; \
+	  fi
+
+$(FILTER): filter.asm
+	@printf '  [ASM] %s\n' "$<"
+	@$(NASM) -f bin -o $@ $<
+	@SIZE=$$(wc -c < $@); \
+	  printf '  [OK]  %-12s %d bytes (%d sectors)\n' "$@" $$SIZE $$((SIZE / 512)); \
+	  if [ $$SIZE -gt $(FILTER_MAX_BYTES) ]; then \
+	    printf '  [ERR] %s exceeds %d byte reservation\n' "$@" $(FILTER_MAX_BYTES); \
 	    rm -f $@; exit 1; \
 	  fi
 
@@ -102,7 +132,7 @@ check:
 	@printf '  [OK]  Tools: nasm qemu-system-i386 dd ndisasm\n'
 
 clean:
-	@rm -f $(LOADER) $(STAGE2) $(SANDBOX) $(IMAGE)
+	@rm -f $(LOADER) $(STAGE2) $(SANDBOX) $(THEME) $(FILTER) $(IMAGE)
 	@printf '  [OK]  Clean complete.\n'
 
 help:
@@ -115,10 +145,12 @@ help:
 	@printf '  make disasm    Disassemble all binaries (ndisasm)\n'
 	@printf '  make clean     Remove build artifacts\n'
 	@printf '\n  Memory Layout:\n'
-	@printf '  0x7C00  stage1.asm   MBR stage1 (512 bytes, sector 0)\n'
-	@printf '  0x7E00  stage2.asm   Shell + engine (12 sectors, sector 2)\n'
-	@printf '  0x9000  sandbox.asm  Protection layer (8 sectors, sector 14)\n'
-	@printf '  0xA000  shellcode    Runtime injection target\n'
+	@printf '  0x7C00  loader.asm    MBR stage1 (512 bytes, sector 0)\n'
+	@printf '  0x7E00  stage2.asm    Shell + engine (12 sectors, sector 2)\n'
+	@printf '  0x9000  sandbox.asm   Protection layer (8 sectors, sector 14)\n'
+	@printf '  0xA000  shellcode     Runtime injection target\n'
+	@printf '  0xB000  theme.asm     Theme engine (2 sectors, sector 26)\n'
+	@printf '  0xC000  filter.asm    Log filter (2 sectors, sector 28)\n'
 	@printf '\n  Shell Commands:\n'
 	@printf '  run              Execute selected payload\n'
 	@printf '  list             List payload modules\n'
@@ -127,4 +159,9 @@ help:
 	@printf '  dump <hex>       Hexdump 32 bytes at address\n'
 	@printf '  info             System module info\n'
 	@printf '  clear            Clear log panel\n'
+	@printf '  theme <1-5>      Set color theme\n'
+	@printf '  themes           List all themes\n'
+	@printf '  filter <0-5>     Set log filter\n'
+	@printf '  filters          List all filters\n'
+	@printf '  errors           Show last error\n'
 	@printf '  help             This message\n\n'
