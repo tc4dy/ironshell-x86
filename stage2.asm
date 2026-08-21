@@ -1,7 +1,7 @@
 BITS 16
-ORG 0x7E00
+; ORG 0x8000
 
-SANDBOX_ENTRY           equ 0x9000
+SANDBOX_ENTRY equ 0x9000
 SHELLCODE_BASE          equ 0xA000
 THEME_BASE              equ 0xB000
 FILTER_BASE             equ 0xC000
@@ -84,6 +84,9 @@ stage2_main:
     jmp     $
 
 theme_init_defaults:
+    push    es
+    xor     ax, ax
+    mov     es, ax
     pusha
     mov     byte [th_normal],   COL_NORMAL
     mov     byte [th_bright],   COL_BRIGHT
@@ -96,6 +99,7 @@ theme_init_defaults:
     mov     byte [th_title],    COL_TITLE
     mov     byte [th_status],   COL_STATUS
     popa
+    pop     es
     ret
 
 theme_apply_color:
@@ -185,6 +189,9 @@ theme_apply_color:
     ret
 
 init_payloads:
+    push    es
+    xor     ax, ax
+    mov     es, ax
     pusha
     mov     di, payload_names
     mov     cx, MAX_PAYLOADS * PAYLOAD_NAME_LEN
@@ -250,6 +257,7 @@ init_payloads:
 
     mov     word [payload_count], 8
     popa
+    pop     es
     ret
 
 run_env_checks:
@@ -705,11 +713,14 @@ cmd_run_payload:
 
     pop     ax
 
-    mov     cl, [payload_flags + ax]
+    mov     bx, ax
+    mov     cl, [payload_flags + bx]
     xor     ch, ch
     push    cx
     push    ax
-    call    sandbox_pre
+    ; call    sandbox_pre
+    nop
+    nop
     jc      .exec_blocked
 
     pop     ax
@@ -761,17 +772,23 @@ cmd_run_payload:
 sandbox_pre:
     push    bp
     mov     bp, sp
-    xor     ah, ah
-    mov     al, [bp+4]
+    mov     ax, [bp+6]      
     push    ax
-    mov     ax, [bp+6]
+    mov     ax, [bp+4]  
     push    ax
-    call    SANDBOX_ENTRY
+    call    far [.sandbox_ptr]
+    pop     bp
     ret
+.sandbox_ptr:
+    dw SANDBOX_ENTRY, 0x0000
+
+SANDBOX_POST    equ 0x902E      
 
 sandbox_post:
-    call    SANDBOX_ENTRY + 6
+    call    far [.sandbox_ptr]
     ret
+.sandbox_ptr:
+    dw SANDBOX_POST, 0x0000
 
 exec_payload:
     cmp     ax, 0
@@ -1539,7 +1556,10 @@ cmd_list_payloads:
     jmp     .do_log
 .not_sel:
     mov     bl, [th_normal]
-    cmp     byte [payload_flags + cx], 0x02
+    push    bx
+    mov     bx, cx
+    cmp     byte [payload_flags + bx], 0x02
+    pop     bx
     jne     .do_log
     mov     bl, [th_warn]
 .do_log:
@@ -1625,7 +1645,10 @@ format_payload_line:
 .name_done:
     pop     ax
 
-    cmp     byte [payload_flags + ax], 0x02
+    push    bx
+    mov     bx, ax
+    cmp     byte [payload_flags + bx], 0x02
+    pop     bx
     jne     .no_danger
 
     cmp     cx, 4
@@ -1876,25 +1899,30 @@ cmd_hexdump:
     ret
 
 ui_full_redraw:
+    push    es
+    xor     ax, ax
+    mov     es, ax
     call    ui_draw_frame
     call    ui_redraw_payload_list
     call    ui_redraw_log
     call    ui_draw_statusbar
     call    ui_draw_prompt
+    pop     es
     ret
 
 ui_draw_frame:
+    push    es
+    xor     ax, ax
+    mov     es, ax
     pusha
     push    es
     mov     ax, VGA_SEG
     mov     es, ax
-
     xor     di, di
     mov     cx, SCREEN_ROWS * SCREEN_COLS
     mov     ah, [th_dim]
     mov     al, 0x20
     rep     stosw
-
     mov     di, TITLE_ROW * VGA_ROW_BYTES
     mov     cx, SCREEN_COLS
     mov     ah, [th_title]
@@ -1904,12 +1932,10 @@ ui_draw_frame:
     mov     si, str_title
     mov     ah, [th_title]
     call    vga_puts
-
     mov     di, (TITLE_ROW * SCREEN_COLS + 60) * 2
     mov     si, str_build
     mov     ah, [th_title]
     call    vga_puts
-
     mov     di, DIVIDER_ROW * VGA_ROW_BYTES
     mov     ah, [th_dim]
     mov     al, 0xC9
@@ -1919,7 +1945,6 @@ ui_draw_frame:
     rep     stosw
     mov     al, 0xBB
     stosw
-
     mov     di, SUB_ROW * VGA_ROW_BYTES
     mov     cx, SCREEN_COLS
     mov     ah, [th_dim]
@@ -1929,7 +1954,6 @@ ui_draw_frame:
     mov     si, str_subtitle
     mov     ah, [th_accent]
     call    vga_puts
-
     mov     di, DIVIDER2_ROW * VGA_ROW_BYTES
     mov     ah, [th_dim]
     mov     al, 0xC7
@@ -1939,52 +1963,43 @@ ui_draw_frame:
     rep     stosw
     mov     al, 0xB6
     stosw
-
     mov     bx, PANEL_START_ROW
 .borders:
     cmp     bx, PANEL_END_ROW
     jg      .borders_done
-
     mov     di, bx
     imul    di, di, SCREEN_COLS
     shl     di, 1
     mov     ah, [th_dim]
     mov     al, 0xB3
     stosw
-
     mov     di, bx
     imul    di, di, SCREEN_COLS
     add     di, LEFT_PANEL_COLS
     shl     di, 1
     stosw
-
     mov     di, bx
     imul    di, di, SCREEN_COLS
     add     di, LEFT_PANEL_COLS + 1
     shl     di, 1
     mov     al, 0xB3
     stosw
-
     mov     di, bx
     imul    di, di, SCREEN_COLS
     add     di, 79
     shl     di, 1
     stosw
-
     inc     bx
     jmp     .borders
-
 .borders_done:
     mov     di, (PANEL_START_ROW * SCREEN_COLS + 1) * 2
     mov     si, str_panel_payloads
     mov     ah, [th_dim]
     call    vga_puts
-
     mov     di, (PANEL_START_ROW * SCREEN_COLS + RIGHT_PANEL_START + 1) * 2
     mov     si, str_panel_log
     mov     ah, [th_dim]
     call    vga_puts
-
     mov     di, PANEL_END_ROW * VGA_ROW_BYTES
     mov     ah, [th_dim]
     mov     al, 0xC0
@@ -1999,9 +2014,9 @@ ui_draw_frame:
     rep     stosw
     mov     al, 0xD9
     stosw
-
     pop     es
     popa
+    pop     es
     ret
 
 ui_draw_statusbar:
@@ -2100,7 +2115,10 @@ ui_redraw_payload_list:
 .normal:
     add     di, 4
     mov     ah, [th_normal]
-    cmp     byte [payload_flags + cx], 0x02
+    push    bx
+    mov     bx, cx
+    cmp     byte [payload_flags + bx], 0x02
+    pop     bx
     jne     .print
     mov     ah, [th_warn]
 
@@ -2168,7 +2186,10 @@ ui_redraw_log:
     jge     .done
 
     push    ax
-    mov     al, [log_colors + cx]
+    push    bx
+    mov     bx, cx
+    mov     al, [log_colors + bx]
+    pop     bx
     call    filter_color_match
     pop     ax
     jc      .skip
@@ -2187,7 +2208,10 @@ ui_redraw_log:
     mov     si, log_buf
     add     si, ax
 
-    mov     ah, [log_colors + cx]
+    push    bx
+    mov     bx, cx
+    mov     ah, [log_colors + bx]
+    pop     bx
     call    vga_puts
     pop     cx
     pop     bx
@@ -2208,7 +2232,10 @@ log_colored:
     dec     word [log_line_count]
     mov     ax, [log_line_count]
     pop     bx
-    mov     [log_colors + ax], bl
+    push    di
+    mov     di, ax
+    mov     [log_colors + di], bl
+    pop     di
     inc     word [log_line_count]
     call    ui_redraw_log
     popa
@@ -2304,7 +2331,10 @@ emit_newline:
     mov     word [partial_col], 0
     mov     ax, [log_line_count]
     mov     bl, [th_normal]
-    mov     [log_colors + ax], bl
+    push    di
+    mov     di, ax
+    mov     [log_colors + di], bl
+    pop     di
     inc     word [log_line_count]
     cmp     word [log_line_count], LOG_MAX_LINES
     jl      .ok
@@ -2985,4 +3015,4 @@ cmd_themes          db "THEMES", 0
 cmd_filters         db "FILTERS", 0
 cmd_errors          db "ERRORS", 0
 
-times 6144 - ($ - $$) db 0
+times 32768 - ($ - $$) db 0
