@@ -191,15 +191,16 @@ Every payload passes through `sandbox_entry` before dispatch and `sandbox_post_e
 ## 🗺️ Memory Layout
 
 ```
-0x0000 – 0x03FF   Interrupt Vector Table (IVT)
-0x0400 – 0x04FF   BIOS Data Area (BDA)
-0x7C00 – 0x7DFF   loader.asm     Stage 1 MBR bootloader        (512 bytes,  1 sector)
-0x7E00 – 0x8FFF   stage2.asm     Execution engine + TUI shell  (6144 bytes, 12 sectors)
-0x9000 – 0x9FFF   sandbox.asm    Protection & analysis layer   (4096 bytes,  8 sectors)
-0xA000 – 0xAFFF   [EXEC]         Shellcode injection target
-0xB000 – 0xB3FF   theme.asm      Theme engine                  (1024 bytes,  2 sectors)
-0xC000 – 0xC3FF   filter.asm     Log filter module             (1024 bytes,  2 sectors)
-0xB800 – 0xBFFF   VGA Text Memory (80×25, mode 0x03)
+0x0000 – 0x03FF Interrupt Vector Table (IVT)
+0x0400 – 0x04FF BIOS Data Area (BDA)
+0x7C00 – 0x7DFF stage1.asm MBR bootloader (512 bytes, 1 sector)
+0x7E00 – 0x8FFF loader.asm Loader module (~1024 bytes, 2 sectors)
+0x8000 – 0xFFFF stage2.asm Execution engine + TUI shell (32768 bytes, 64 sectors)
+0x9000 – 0xAFFF sandbox.asm Protection & analysis layer (8192 bytes, 16 sectors)
+0xA000 – 0xAFFF [EXEC] Shellcode injection target
+0xB000 – 0xB3FF theme.asm Theme engine (1024 bytes, 2 sectors)
+0xC000 – 0xC3FF filter.asm Log filter module (1024 bytes, 2 sectors)
+0xB800 – 0xBFFF VGA Text Memory (80×25, mode 0x03)
 ```
 
 > **Note:** The theme module at 0xB000 and VGA text buffer at 0xB800 are in the same physical segment space. Module data is accessed as flat 16-bit offsets from DS=0x0000, so `0x0000:0xB000` (theme) and `0xB800:0x0000` (VGA segment) resolve to different physical addresses and do not overlap.
@@ -258,8 +259,9 @@ Step through the MBR byte by byte, inspect registers, and trace the full boot se
 
 ```
 ironshell-x86/
-├── loader.asm      Stage 1 MBR — disk loader, VGA boot UI, retry logic
-├── stage2.asm      Execution engine, TUI shell, 8 payloads, theme/filter integration
+├── stage1.asm      MBR bootloader — loads loader from disk
+├── loader.asm      Loader module — loads stage2, sandbox, theme, filter
+├── stage2.asm      Execution engine, TUI shell, 8 payloads
 ├── sandbox.asm     Protection layer v2.1 — policy engine, opcode scan, IVT diff+restore
 ├── theme.asm       Theme engine — 5 themes, 10-slot color table, live redraw
 ├── filter.asm      Log filter module — 6 filter modes, color-category matching
@@ -271,6 +273,9 @@ ironshell-x86/
 ## 📋 Version History
 
 **v2.1** — current
+
+**New Features:**
+
 - Added `theme.asm` module (0xB000): 5 color themes, live screen redraw
 - Added `filter.asm` module (0xC000): 6 log filter modes, render-time filtering
 - Added `MEMMAP` payload (E820 memory map via INT 15h with INT 12h fallback)
@@ -279,15 +284,21 @@ ironshell-x86/
 - Payload arguments: `sel <n> <arg>` passes runtime args to PORTPROBE, STACKSMASH, IVTDUMP
 - Error tracking: typed error codes with `errors` command
 - Log scroll: PgUp/PgDn navigation in the log panel
+
+**Fixes:**
+
 - Fixed: sandbox bypass in `exec_payload` — all payloads now route through `sandbox_entry`
 - Fixed: `payload_memwalk` stack corruption (double BX increment)
 - Fixed: `sb_pre_exec` policy logic (`jge` → correct allow/block ordering)
 - Fixed: `hist_prev` scasb using wrong DI after movsb
 - Fixed: `format_payload_line` invalid NASM multi-operand `mov`
 - Fixed: E820 entry stride inconsistency (20 vs 24 bytes)
-- Fixed: stage2/sandbox memory overlap (stage2 padded to 6144, sandbox at 0x9000 — gap enforced by layout)
+- Fixed: stage2/sandbox memory overlap (stage2 padded to 32768, sandbox at 0x9000 — gap enforced by layout)
 - Fixed: `strcpy_bounded_name` double null write
 - Fixed: `vga_draw_banner` box-drawing character sequence
+- Fixed: loader sector layout and disk addressing
+- Fixed: ES segment corruption in `init_payloads`, `theme_init_defaults`, `ui_full_redraw`, `ui_draw_frame`
 
 **v1.0** — initial release
+
 - 2-stage bootloader, 7 payloads, basic sandbox with 4 policies
