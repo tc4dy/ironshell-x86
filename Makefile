@@ -6,21 +6,24 @@ NDISASM  := ndisasm
 IMAGE    := sx-sandbox.img
 SECTORS  := 2880
 
+STAGE1   := stage1.bin
 LOADER   := loader.bin
 STAGE2   := stage2.bin
 SANDBOX  := sandbox.bin
 THEME    := theme.bin
 FILTER   := filter.bin
 
-LOADER_SECTOR   := 0
-STAGE2_SECTOR   := 2
-SANDBOX_SECTOR  := 14
-THEME_SECTOR    := 26
-FILTER_SECTOR   := 28
+STAGE1_SECTOR   := 0
+LOADER_SECTOR   := 1
+STAGE2_SECTOR   := 3
+SANDBOX_SECTOR  := 67
+THEME_SECTOR    := 83
+FILTER_SECTOR   := 85
 
-LOADER_MAX_BYTES  := 512
-STAGE2_MAX_BYTES  := 6144
-SANDBOX_MAX_BYTES := 4096
+STAGE1_MAX_BYTES  := 512
+LOADER_MAX_BYTES  := 6144
+STAGE2_MAX_BYTES  := 32768
+SANDBOX_MAX_BYTES := 8192
 THEME_MAX_BYTES   := 1024
 FILTER_MAX_BYTES  := 1024
 
@@ -39,13 +42,15 @@ QEMU_DEBUG  := $(QEMU_BASE) -display curses -s -S
 all: check $(IMAGE)
 	@printf '\n  Build complete: %s\n  Run: make run\n\n' "$(IMAGE)"
 
-$(IMAGE): $(LOADER) $(STAGE2) $(SANDBOX) $(THEME) $(FILTER)
+$(IMAGE): $(STAGE1) $(LOADER) $(STAGE2) $(SANDBOX) $(THEME) $(FILTER)
 	@printf '  [IMG] Creating blank disk (%d sectors)...\n' $(SECTORS)
 	@$(DD) if=/dev/zero of=$(IMAGE) bs=512 count=$(SECTORS) status=none
-	@printf '  [IMG] Writing %-8s -> sector %d\n' "$(LOADER)"  $(LOADER_SECTOR)
-	@$(DD) if=$(LOADER)  of=$(IMAGE) bs=512 seek=$(LOADER_SECTOR)  conv=notrunc status=none
-	@printf '  [IMG] Writing %-8s -> sector %d\n' "$(STAGE2)"  $(STAGE2_SECTOR)
-	@$(DD) if=$(STAGE2)  of=$(IMAGE) bs=512 seek=$(STAGE2_SECTOR)  conv=notrunc status=none
+	@printf '  [IMG] Writing %-8s -> sector %d\n' "$(STAGE1)" $(STAGE1_SECTOR)
+	@$(DD) if=$(STAGE1) of=$(IMAGE) bs=512 seek=$(STAGE1_SECTOR) conv=notrunc status=none
+	@printf '  [IMG] Writing %-8s -> sector %d\n' "$(LOADER)" $(LOADER_SECTOR)
+	@$(DD) if=$(LOADER) of=$(IMAGE) bs=512 seek=$(LOADER_SECTOR) conv=notrunc status=none
+	@printf '  [IMG] Writing %-8s -> sector %d\n' "$(STAGE2)" $(STAGE2_SECTOR)
+	@$(DD) if=$(STAGE2) of=$(IMAGE) bs=512 seek=$(STAGE2_SECTOR) conv=notrunc status=none
 	@printf '  [IMG] Writing %-8s -> sector %d\n' "$(SANDBOX)" $(SANDBOX_SECTOR)
 	@$(DD) if=$(SANDBOX) of=$(IMAGE) bs=512 seek=$(SANDBOX_SECTOR) conv=notrunc status=none
 	@printf '  [IMG] Writing %-8s -> sector %d\n' "$(THEME)" $(THEME_SECTOR)
@@ -54,15 +59,25 @@ $(IMAGE): $(LOADER) $(STAGE2) $(SANDBOX) $(THEME) $(FILTER)
 	@$(DD) if=$(FILTER) of=$(IMAGE) bs=512 seek=$(FILTER_SECTOR) conv=notrunc status=none
 	@printf '  [OK]  Disk image ready.\n'
 
+$(STAGE1): stage1.asm
+	@printf '  [ASM] %s\n' "$<"
+	@$(NASM) -f bin -o $@ $<
+	@SIZE=$$(wc -c < $@); \
+	  if [ $$SIZE -ne $(STAGE1_MAX_BYTES) ]; then \
+	    printf '  [ERR] %s must be exactly %d bytes (got %d)\n' "$@" $(STAGE1_MAX_BYTES) $$SIZE; \
+	    rm -f $@; exit 1; \
+	  fi
+	@printf '  [OK]  %-12s %d bytes (MBR)\n' "$@" $(STAGE1_MAX_BYTES)
+
 $(LOADER): loader.asm
 	@printf '  [ASM] %s\n' "$<"
 	@$(NASM) -f bin -o $@ $<
 	@SIZE=$$(wc -c < $@); \
-	  if [ $$SIZE -ne $(LOADER_MAX_BYTES) ]; then \
-	    printf '  [ERR] %s must be exactly %d bytes (got %d)\n' "$@" $(LOADER_MAX_BYTES) $$SIZE; \
+	  printf '  [OK]  %-12s %d bytes (%d sectors)\n' "$@" $$SIZE $$((SIZE / 512)); \
+	  if [ $$SIZE -gt $(LOADER_MAX_BYTES) ]; then \
+	    printf '  [ERR] %s exceeds %d byte reservation\n' "$@" $(LOADER_MAX_BYTES); \
 	    rm -f $@; exit 1; \
 	  fi
-	@printf '  [OK]  %-12s %d bytes (MBR)\n' "$@" $(LOADER_MAX_BYTES)
 
 $(STAGE2): stage2.asm
 	@printf '  [ASM] %s\n' "$<"
@@ -116,11 +131,13 @@ debug: $(IMAGE)
 	@printf '        Then: break *0x7c00   continue\n'
 	$(QEMU) $(QEMU_DEBUG)
 
-disasm: $(LOADER) $(STAGE2) $(SANDBOX)
-	@printf '\n=== LOADER  (0x7C00) ===\n'
-	@$(NDISASM) -b 16 -o 0x7C00 $(LOADER)
-	@printf '\n=== STAGE2  (0x7E00) ===\n'
-	@$(NDISASM) -b 16 -o 0x7E00 $(STAGE2)
+disasm: $(STAGE1) $(LOADER) $(STAGE2) $(SANDBOX)
+	@printf '\n=== STAGE1 (0x7C00) ===\n'
+	@$(NDISASM) -b 16 -o 0x7C00 $(STAGE1)
+	@printf '\n=== LOADER (0x7E00) ===\n'
+	@$(NDISASM) -b 16 -o 0x7E00 $(LOADER)
+	@printf '\n=== STAGE2 (0x9A00) ===\n'
+	@$(NDISASM) -b 16 -o 0x9A00 $(STAGE2)
 	@printf '\n=== SANDBOX (0x9000) ===\n'
 	@$(NDISASM) -b 16 -o 0x9000 $(SANDBOX)
 
@@ -132,7 +149,7 @@ check:
 	@printf '  [OK]  Tools: nasm qemu-system-i386 dd ndisasm\n'
 
 clean:
-	@rm -f $(LOADER) $(STAGE2) $(SANDBOX) $(THEME) $(FILTER) $(IMAGE)
+	@rm -f $(STAGE1) $(LOADER) $(STAGE2) $(SANDBOX) $(THEME) $(FILTER) $(IMAGE)
 	@printf '  [OK]  Clean complete.\n'
 
 help:
@@ -145,8 +162,9 @@ help:
 	@printf '  make disasm    Disassemble all binaries (ndisasm)\n'
 	@printf '  make clean     Remove build artifacts\n'
 	@printf '\n  Memory Layout:\n'
-	@printf '  0x7C00  loader.asm    MBR stage1 (512 bytes, sector 0)\n'
-	@printf '  0x7E00  stage2.asm    Shell + engine (12 sectors, sector 2)\n'
+	@printf '  0x7C00  stage1.asm    MBR (512 bytes, sector 0)\n'
+	@printf '  0x7E00  loader.asm    Loader (12 sectors, sector 2)\n'
+	@printf '  0x9A00  stage2.asm    Shell + engine (12 sectors, sector 14)\n'
 	@printf '  0x9000  sandbox.asm   Protection layer (8 sectors, sector 14)\n'
 	@printf '  0xA000  shellcode     Runtime injection target\n'
 	@printf '  0xB000  theme.asm     Theme engine (2 sectors, sector 26)\n'
