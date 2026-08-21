@@ -1,32 +1,31 @@
 BITS 16
-ORG 0x7C00
+ORG 0x7E00
 
 STAGE2_SEG              equ 0x0000
-STAGE2_OFF              equ 0x7E00
-STAGE2_LBA              equ 2
-STAGE2_SECTORS          equ 12
+STAGE2_OFF              equ 0x8000
+STAGE2_LBA              equ 3
+STAGE2_SECTORS          equ 64
 
 SANDBOX_SEG             equ 0x0000
 SANDBOX_OFF             equ 0x9000
-SANDBOX_LBA             equ 14
-SANDBOX_SECTORS         equ 8
+SANDBOX_LBA             equ 67
+SANDBOX_SECTORS         equ 16
 
 SHELLCODE_SEG           equ 0x0000
 SHELLCODE_OFF           equ 0xA000
-SHELLCODE_LBA           equ 22
+SHELLCODE_LBA           equ 83
 SHELLCODE_SECTORS       equ 4
 
 THEME_SEG               equ 0x0000
 THEME_OFF               equ 0xB000
-THEME_LBA               equ 26
+THEME_LBA               equ 87          
 THEME_SECTORS           equ 2
 
 FILTER_SEG              equ 0x0000
 FILTER_OFF              equ 0xC000
-FILTER_LBA              equ 28
+FILTER_LBA              equ 89          
 FILTER_SECTORS          equ 2
 
-DISK_RETRIES            equ 5
 VGA_SEG                 equ 0xB800
 SCREEN_COLS             equ 80
 SCREEN_ROWS             equ 25
@@ -39,11 +38,6 @@ COL_ERROR               equ 0x0C
 COL_DIM                 equ 0x08
 COL_BANNER              equ 0x4F
 COL_ACCENT              equ 0x0B
-
-jmp short boot_entry
-nop
-
-times 59 db 0
 
 boot_entry:
     cli
@@ -127,92 +121,70 @@ boot_entry:
     mov     es, ax
     jmp     STAGE2_SEG:STAGE2_OFF
 
+; disk_load: LBA extended read (INT 13h AH=42h)
+; IN: ax=segment, bx=offset, cx=sector_count, dx=start_lba
+; OUT: CF set on error
 disk_load:
     push    bp
     mov     bp, sp
-    sub     sp, 10
+    sub     sp, 8
 
-    mov     [bp-2],  ax
-    mov     [bp-4],  bx
-    mov     [bp-6],  cx
-    mov     [bp-8],  dx
-    mov     word [bp-10], 0
+    mov     [bp-2], ax      ; segment
+    mov     [bp-4], bx      ; offset
+    mov     [bp-6], cx      ; count
+    mov     [bp-8], dx      ; current LBA
 
-    mov     cx, [bp-6]
-
-.next:
-    push    cx
-
+.next_sector:
+    ; DAP (Disk Address Packet) - 16 bytes on stack
+    ; We'll use a fixed DAP buffer in memory instead
     mov     ax, [bp-8]
-    call    lba_to_chs
-
-    mov     cx, DISK_RETRIES
-
-.retry:
-    push    cx
+    mov     [dap_lba_low], ax
     mov     ax, [bp-2]
-    mov     es, ax
-    mov     bx, [bp-4]
-    mov     ax, 0x0201
-    mov     cx, [chs_cyl]
-    mov     dh, [chs_head]
+    mov     [dap_seg], ax
+    mov     ax, [bp-4]
+    mov     [dap_off], ax
+
+    mov     ah, 0x42
     mov     dl, [boot_drive]
+    mov     si, dap
     int     0x13
-    pop     cx
-    jnc     .ok
+    jc      .fail
 
-    push    ax
-    xor     ax, ax
-    mov     dl, [boot_drive]
-    int     0x13
-    pop     ax
-    loop    .retry
-
-    pop     cx
-    mov     sp, bp
-    pop     bp
-    stc
-    ret
-
-.ok:
+    ; advance buffer by 512
     mov     ax, [bp-4]
     add     ax, 512
     mov     [bp-4], ax
-    jnc     .no_seg
-
+    jnc     .no_seg_fix
     mov     ax, [bp-2]
     add     ax, 0x1000
     mov     [bp-2], ax
+.no_seg_fix:
 
-.no_seg:
     inc     word [bp-8]
-    pop     cx
-    loop    .next
+    dec     word [bp-6]
+    jnz     .next_sector
 
     mov     sp, bp
     pop     bp
     clc
     ret
 
-lba_to_chs:
-    push    ax
-    push    dx
-    xor     dx, dx
-    div     word [spt]
-    mov     [chs_sect], dl
-    inc     byte [chs_sect]
-    xor     dx, dx
-    div     word [heads]
-    mov     [chs_head], dl
-    mov     cl, [chs_sect]
-    and     cl, 0x3F
-    shl     ah, 6
-    or      cl, ah
-    mov     ch, al
-    mov     [chs_cyl], cx
-    pop     dx
-    pop     ax
+.fail:
+    mov     sp, bp
+    pop     bp
+    stc
     ret
+
+; DAP - Disk Address Packet (fixed buffer)
+dap:
+dap_size    db  0x10        ; DAP size = 16
+dap_res     db  0x00        ; reserved
+dap_count   dw  0x0001      ; read 1 sector at a time
+dap_off     dw  0x0000      ; buffer offset
+dap_seg     dw  0x0000      ; buffer segment
+dap_lba_low dw  0x0000      ; LBA bits 0-15
+dap_lba_mid dw  0x0000      ; LBA bits 16-31
+dap_lba_hi  dd  0x00000000  ; LBA bits 32-63
 
 vga_clear:
     pusha
@@ -367,24 +339,16 @@ fatal_disk:
 
 boot_drive      db 0
 status_row      db 5
-spt             dw 18
-heads           dw 2
-chs_cyl         dw 0
-chs_head        db 0
-chs_sect        db 0
 
 str_banner      db "  SX-SANDBOX  |  SHELLCODE EXECUTION ENVIRONMENT  |  v2.1  |  x86 BARE-METAL", 0
 str_banner_sub  db "Loader v2.1  >>  Initializing subsystems...", 0
 str_progress    db "LOADING  [", 0
 
-msg_load_stage2 db "[*] Loading execution engine (stage2)...", 0
+msg_load_stage2  db "[*] Loading execution engine (stage2)...", 0
 msg_load_sandbox db "[*] Loading sandbox protection layer...", 0
-msg_load_shell  db "[*] Staging shellcode payloads...", 0
-msg_load_theme  db "[*] Loading theme engine...", 0
-msg_load_filter db "[*] Loading log filter module...", 0
-msg_launch      db "[+] All modules verified. Transferring control...", 0
-msg_disk_err    db "[!] FATAL: Disk read failure. Sector unreadable.", 0
-msg_halt        db "    System halted. Press RESET to restart.", 0
-
-times 510 - ($ - $$) db 0
-dw 0xAA55
+msg_load_shell   db "[*] Staging shellcode payloads...", 0
+msg_load_theme   db "[*] Loading theme engine...", 0
+msg_load_filter  db "[*] Loading log filter module...", 0
+msg_launch       db "[+] All modules verified. Transferring control...", 0
+msg_disk_err     db "[!] FATAL: Disk read failure. Sector unreadable.", 0
+msg_halt         db "    System halted. Press RESET to restart.", 0
