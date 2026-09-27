@@ -15,26 +15,26 @@
 
 ---
 
-## ✨ Features
+## [>>] Features
 
-- 🥾 **2-Stage Bootloader** — Stage 1 MBR loads Stage 2 + Sandbox + Shellcode + Theme + Filter modules from disk with retry logic
-- 🖥️ **TUI Shell** — Full interactive terminal UI with dual-panel VGA layout, command history (↑↓), page scroll (PgUp/PgDn), and live execution log
-- 💉 **8 Injectable Payloads** — MSGBOX, MEMWALK, PORTPROBE, STACKSMASH, NXPROBE, CPUINFO, IVTDUMP, MEMMAP
-- 🛡️ **Sandbox v2.1** — 4 enforcement policies, pre-execution opcode scanning (STI/HLT/IO/PRIV), IVT snapshot diffing with auto-restore, register integrity checks, CPUID support detection
-- 🎨 **Theme Engine** — 5 color themes (COLOR, MONO, HACKER, RETRO, STEALTH) loaded as a separate module at 0xB000
-- 🔍 **Log Filter System** — 6 filter modes (ALL, INFO, WARN, ERROR, SUCCESS, ACCENT) loaded as a separate module at 0xC000
-- 🔬 **Hardware Analysis** — CPUID vendor/brand/feature detection, A20 gate test, E820 memory map, conventional memory sizing
-- 🧰 **Error Tracking** — Typed error codes with descriptions, per-session error history via `errors` command
-- ⚙️ **Clean Build System** — NASM + QEMU Makefile with GDB debug stub, ndisasm disassembly, and hard binary size validation for all 5 modules
+- [+] **2-Stage Bootloader** — Stage 1 MBR loads Stage 2 + Sandbox + Shellcode + Theme + Filter modules from disk with retry logic
+- [+] **TUI Shell** — Full interactive terminal UI with dual-panel VGA layout, command history (↑↓), page scroll (PgUp/PgDn), and live execution log
+- [+] **8 Injectable Payloads** — MSGBOX, MEMWALK, PORTPROBE, STACKSMASH, NXPROBE, CPUINFO, IVTDUMP, MEMMAP
+- [+] **Sandbox v2.1** — 4 enforcement policies, pre-execution opcode scanning (STI/HLT/IO/PRIV), IVT snapshot diffing with auto-restore, register integrity checks, CPUID support detection
+- [+] **Theme Engine** — 5 color themes (COLOR, MONO, HACKER, RETRO, STEALTH) loaded as a separate module at 0xB000
+- [+] **Log Filter System** — 6 filter modes (ALL, INFO, WARN, ERROR, SUCCESS, ACCENT) loaded as a separate module at 0xC000
+- [+] **Hardware Analysis** — CPUID vendor/brand/feature detection, A20 gate test, E820 memory map, conventional memory sizing
+- [+] **Error Tracking** — Typed error codes with descriptions, per-session error history via `errors` command
+- [+] **Clean Build System** — NASM + QEMU Makefile with GDB debug stub, ndisasm disassembly, and hard binary size validation for all 5 modules
 
 ---
 
-## Schematic of the Working and Execution Logic 💻✅
+## Schematic of the Working and Execution Logic 
 ![Scheme](/Photos/scheme.png)
 
 ---
 
-## 📦 Installation
+## [CD] Installation
 
 ### 1. Clone the repository
 
@@ -58,7 +58,7 @@ make run
 
 ---
 
-## 🚀 Usage
+## Usage
 
 ```bash
 make              # Build all binaries and assemble disk image
@@ -72,7 +72,7 @@ make help         # Show full build reference
 
 ---
 
-## 🖥️ Shell Commands
+## [-<] Shell Commands
 
 Once booted in QEMU, the interactive shell accepts:
 
@@ -96,7 +96,7 @@ Once booted in QEMU, the interactive shell accepts:
 
 ---
 
-## 💉 Payload Reference
+## [-/] Payload Reference
 
 | # | Name | Description | Risk |
 |---|---|---|---|
@@ -119,7 +119,7 @@ Once booted in QEMU, the interactive shell accepts:
 
 ---
 
-## 🎨 Theme System
+## Theme System
 
 5 built-in color themes, switchable live without reboot:
 
