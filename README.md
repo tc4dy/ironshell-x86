@@ -1,6 +1,6 @@
 ![Logo](/Photos/ironshell_x86_banner.svg)
 
-# 🔩 ironshell-x86 – Bare-Metal Shellcode Sandbox
+# ironshell-x86 – Bare-Metal Shellcode Sandbox
 
 **ironshell-x86** is a bare-metal x86 shellcode execution and analysis environment written entirely in 16-bit Assembly. It runs directly from a bootable disk image — no OS, no runtime, no libc. Just raw silicon.
 
@@ -100,14 +100,14 @@ Once booted in QEMU, the interactive shell accepts:
 
 | # | Name | Description | Risk |
 |---|---|---|---|
-| 0 | `MSGBOX` | Constructs a PIC stub at 0xA000 and executes it | ✅ Safe |
-| 1 | `MEMWALK` | Walks and dumps the BIOS Data Area (0x0400+) | ✅ Safe |
-| 2 | `PORTPROBE` | Samples 8 I/O ports starting at 0x03F8 via `IN` | ✅ Safe |
-| 3 | `STACKSMASH` | Writes canary pattern to stack and verifies integrity | ⚠️ Caution |
-| 4 | `NXPROBE` | Tests NX/DEP enforcement by executing a RET stub at 0xA000 | ✅ Safe |
-| 5 | `CPUINFO` | Full CPUID enumeration — vendor, brand, stepping, SSE/AVX | ✅ Safe |
-| 6 | `IVTDUMP` | Dumps N Interrupt Vector Table entries; default 16 (INT 0–15) | ✅ Safe |
-| 7 | `MEMMAP` | Queries E820 system memory map via INT 15h; falls back to INT 12h | ✅ Safe |
+| 0 | `MSGBOX` | Constructs a PIC stub at 0xA000 and executes it | [+] Safe |
+| 1 | `MEMWALK` | Walks and dumps the BIOS Data Area (0x0400+) | [+] Safe |
+| 2 | `PORTPROBE` | Samples 8 I/O ports starting at 0x03F8 via `IN` | [+] Safe |
+| 3 | `STACKSMASH` | Writes canary pattern to stack and verifies integrity | [!] Caution |
+| 4 | `NXPROBE` | Tests NX/DEP enforcement by executing a RET stub at 0xA000 | [+] Safe |
+| 5 | `CPUINFO` | Full CPUID enumeration — vendor, brand, stepping, SSE/AVX | [+] Safe |
+| 6 | `IVTDUMP` | Dumps N Interrupt Vector Table entries; default 16 (INT 0–15) | [+] Safe |
+| 7 | `MEMMAP` | Queries E820 system memory map via INT 15h; falls back to INT 12h | [+] Safe |
 
 **Payload arguments** — use `sel <n> <arg>` before `run`:
 
@@ -140,7 +140,7 @@ The theme engine loads as a standalone module at **0xB000**. All 10 UI color slo
 
 ---
 
-## 🔍 Log Filter System
+## [>_] Log Filter System
 
 6 filter modes to control what the log panel shows:
 
@@ -162,7 +162,7 @@ The filter engine loads as a standalone module at **0xC000**. Filtering is appli
 
 ---
 
-## 🛡️ Sandbox v2.1
+## [#] Sandbox v2.1
 
 The sandbox module (`sandbox.asm`) loads at `0x9000` and enforces one of four active policies:
 
@@ -188,7 +188,7 @@ Every payload passes through `sandbox_entry` before dispatch and `sandbox_post_e
 
 ---
 
-## 🗺️ Memory Layout
+## Memory Layout
 
 ```
 0x0000 – 0x03FF Interrupt Vector Table (IVT)
@@ -207,7 +207,7 @@ Every payload passes through `sandbox_entry` before dispatch and `sandbox_post_e
 
 ---
 
-## 🧰 Error Codes
+## [i] Error Codes
 
 The `errors` command shows the last typed error code and a plain-text description:
 
@@ -227,7 +227,7 @@ The `errors` command shows the last typed error code and a plain-text descriptio
 
 ---
 
-## 🔧 Debug with GDB
+## [dbg] Debug with GDB
 
 ```bash
 make debug
@@ -247,7 +247,7 @@ Step through the MBR byte by byte, inspect registers, and trace the full boot se
 
 ---
 
-## ⚠️ Requirements
+## Requirements
 
 - `nasm` — Netwide Assembler
 - `qemu-system-i386` — x86 system emulator
@@ -255,7 +255,7 @@ Step through the MBR byte by byte, inspect registers, and trace the full boot se
 
 ---
 
-## 📁 File Structure
+## File Structure
 
 ```
 ironshell-x86/
@@ -270,7 +270,7 @@ ironshell-x86/
 
 ---
 
-## 📋 Version History
+## Version History
 
 **v2.1.5** — current
 
