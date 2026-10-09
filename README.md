@@ -40,7 +40,7 @@
 
 ```bash
 git clone https://github.com/tc4dy/ironshell-x86.git
-cd ironshell-x86
+cd ironshell-x86/ironshell-x86
 ```
 
 ### 2. Install dependencies
