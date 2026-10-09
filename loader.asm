@@ -80,16 +80,6 @@ boot_entry:
     call    disk_load
     jc      fatal_disk
 
-    mov     si, msg_load_shell
-    mov     bl, COL_OK
-    call    status_writeln
-    mov     ax, SHELLCODE_SEG
-    mov     bx, SHELLCODE_OFF
-    mov     cx, SHELLCODE_SECTORS
-    mov     dx, SHELLCODE_LBA
-    call    disk_load
-    jc      fatal_disk
-
     mov     si, msg_load_theme
     mov     bl, COL_OK
     call    status_writeln
