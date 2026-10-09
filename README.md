@@ -100,9 +100,9 @@ Once booted in QEMU, the interactive shell accepts:
 
 | # | Name | Description | Risk |
 |---|---|---|---|
-| 0 | `MSGBOX` | Constructs a PIC stub at 0xA000 and executes it | [+] Safe |
+| 0 | `MSGBOX` | Writes a small MOV/RET stub at 0xA000 and executes it | [+] Safe |
 | 1 | `MEMWALK` | Walks and dumps the BIOS Data Area (0x0400+) | [+] Safe |
-| 2 | `PORTPROBE` | Samples 8 I/O ports starting at 0x03F8 via `IN` | [+] Safe |
+| 2 | `PORTPROBE` | Samples 8 I/O ports starting at the given hex port (default `0x03F8`) via `IN` | [+] Safe |
 | 3 | `STACKSMASH` | Writes canary pattern to stack and verifies integrity | [!] Caution |
 | 4 | `NXPROBE` | Tests NX/DEP enforcement by executing a RET stub at 0xA000 | [+] Safe |
 | 5 | `CPUINFO` | Full CPUID enumeration — vendor, brand, stepping, SSE/AVX | [+] Safe |
@@ -169,7 +169,7 @@ The sandbox module (`sandbox.asm`) loads at `0x9000` and enforces one of four ac
 | Policy | Value | Behavior |
 |---|---|---|
 | `POLICY_ALLOW_ALL` | `0x00` | All payloads execute without restriction |
-| `POLICY_BLOCK_DANGER` | `0x01` | Payloads flagged `DANGEROUS` are blocked *(default)* |
+| `POLICY_BLOCK_DANGER` | `0x01` | The payload flagged `DANGEROUS` (STACKSMASH) is blocked *(default)* |
 | `POLICY_AUDIT_ONLY` | `0x02` | All payloads execute; violations are logged only |
 | `POLICY_LOCKDOWN` | `0x03` | No execution permitted under any condition |
 
@@ -184,7 +184,7 @@ Pre-execution analysis (v2.1) includes:
 - **Bounds check** — confirms payload dispatch address is within `0xA000–0xAFFF`
 - **Policy scoring** — a 0–100 score tracks cumulative violation weight across the session
 
-Every payload passes through `sandbox_entry` before dispatch and `sandbox_post_exec` after return. The sandbox is never bypassed.
+Every payload is pre-scanned by `sandbox_entry` before dispatch and post-audited by `sandbox_post_exec` after return. Policy enforcement, opcode scanning and IVT diffing happen in the sandbox envelope; the payload body itself executes outside it.
 
 ---
 
@@ -194,7 +194,7 @@ Every payload passes through `sandbox_entry` before dispatch and `sandbox_post_e
 0x0000 – 0x03FF Interrupt Vector Table (IVT)
 0x0400 – 0x04FF BIOS Data Area (BDA)
 0x7C00 – 0x7DFF stage1.asm MBR bootloader (512 bytes, 1 sector)
-0x7E00 – 0x8FFF loader.asm Loader module (~1024 bytes, 2 sectors)
+0x7E00 – 0x85FF loader.asm Loader module (~2048 bytes, 4 sectors)
 0x8000 – 0xFFFF stage2.asm Execution engine + TUI shell (32768 bytes, 64 sectors)
 0x9000 – 0xAFFF sandbox.asm Protection & analysis layer (8192 bytes, 16 sectors)
 0xA000 – 0xAFFF [EXEC] Shellcode injection target
@@ -287,7 +287,7 @@ ironshell-x86/
 
 **Fixes:**
 
-- Fixed: sandbox bypass in `exec_payload` — all payloads now route through `sandbox_entry`
+- Fixed: `exec_payload` now pre-scans all payloads through `sandbox_entry` before dispatch
 - Fixed: `payload_memwalk` stack corruption (double BX increment)
 - Fixed: `sb_pre_exec` policy logic (`jge` → correct allow/block ordering)
 - Fixed: `hist_prev` scasb using wrong DI after movsb
@@ -302,3 +302,4 @@ ironshell-x86/
 **v1.0** — initial release
 
 - 2-stage bootloader, 7 payloads, basic sandbox with 4 policies
+- For the full changelog across all versions, see [CHANGELOG.md](CHANGELOG.md).
