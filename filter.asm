@@ -14,19 +14,26 @@ COL_WARN        equ 0x0E
 COL_ACCENT      equ 0x0B
 COL_DIM         equ 0x08
 
+filter_api:
+filter_api_set:   jmp near filter_set
+filter_api_get:   jmp near filter_get
+filter_api_match: jmp near filter_match
+filter_api_name:  jmp near filter_get_name
+filter_api_list:  jmp near filter_list_entry
+
 filter_set:
     cmp     al, FILTER_ACCENT
     ja      .reject
     mov     [active_filter], al
     clc
-    ret
+    retf
 .reject:
     stc
-    ret
+    retf
 
 filter_get:
     mov     al, [active_filter]
-    ret
+    retf
 
 filter_match:
     push    bx
@@ -73,14 +80,15 @@ filter_match:
 .pass:
     clc
     pop     bx
-    ret
+    retf
 
 .fail:
     stc
     pop     bx
-    ret
+    retf
 
 filter_get_name:
+    push    bx
     push    ax
     push    cx
     push    dx
@@ -89,15 +97,18 @@ filter_get_name:
     xor     ch, ch
     mov     ax, cx
     mov     cx, 11
+    xor     dx, dx
     mul     cx
     mov     si, filter_names
     add     si, ax
     pop     dx
     pop     cx
     pop     ax
-    ret
+    pop     bx
+    retf
 
 filter_list_entry:
+    push    bx
     push    ax
     push    cx
     push    dx
@@ -112,13 +123,15 @@ filter_list_entry:
     pop     dx
     pop     cx
     pop     ax
-    ret
+    pop     bx
+    retf
 .bad:
     stc
     pop     dx
     pop     cx
     pop     ax
-    ret
+    pop     bx
+    retf
 
 active_filter   db FILTER_ALL
 
