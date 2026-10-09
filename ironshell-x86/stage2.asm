@@ -2754,7 +2754,7 @@ th_title            db COL_TITLE
 th_status           db COL_STATUS
 
 str_title           db "  SX-SANDBOX  >>  SHELLCODE EXECUTION & ANALYSIS ENVIRONMENT  //  x86 REAL MODE", 0
-str_build           db "BUILD 2.1.0", 0
+str_build           db "BUILD 2.1.6", 0
 str_subtitle        db "Arch: x86-16  |  Mode: Real  |  BIOS: Legacy INT  |  Target: 0xA000", 0
 str_panel_payloads  db "PAYLOADS", 0
 str_panel_log       db "EXECUTION LOG", 0
