@@ -9,6 +9,23 @@ THEME_STEALTH   equ 0x0005
 
 THEME_COUNT     equ 5
 
+theme_api:
+theme_api_set:          jmp near theme_set
+theme_api_get:          jmp near theme_get
+theme_api_col_normal:   jmp near theme_get_col_normal
+theme_api_col_bright:   jmp near theme_get_col_bright
+theme_api_col_success:  jmp near theme_get_col_success
+theme_api_col_error:    jmp near theme_get_col_error
+theme_api_col_warn:     jmp near theme_get_col_warn
+theme_api_col_accent:   jmp near theme_get_col_accent
+theme_api_col_dim:      jmp near theme_get_col_dim
+theme_api_col_selected: jmp near theme_get_col_selected
+theme_api_col_title:    jmp near theme_get_col_title
+theme_api_col_status:   jmp near theme_get_col_status
+theme_api_name:         jmp near theme_get_name
+theme_api_list:         jmp near theme_list_entry
+theme_api_copy_colors:  jmp near theme_copy_colors
+
 theme_set:
     push    bx
     push    cx
@@ -29,87 +46,87 @@ theme_set:
     pop     dx
     pop     cx
     pop     bx
-    ret
+    retf
 .reject:
     stc
     pop     dx
     pop     cx
     pop     bx
-    ret
+    retf
 
 theme_get:
     mov     al, [active_theme]
-    ret
+    retf
 
 theme_get_col_normal:
     push    bx
     call    theme_ptr
     mov     al, [bx + 0]
     pop     bx
-    ret
+    retf
 
 theme_get_col_bright:
     push    bx
     call    theme_ptr
     mov     al, [bx + 1]
     pop     bx
-    ret
+    retf
 
 theme_get_col_success:
     push    bx
     call    theme_ptr
     mov     al, [bx + 2]
     pop     bx
-    ret
+    retf
 
 theme_get_col_error:
     push    bx
     call    theme_ptr
     mov     al, [bx + 3]
     pop     bx
-    ret
+    retf
 
 theme_get_col_warn:
     push    bx
     call    theme_ptr
     mov     al, [bx + 4]
     pop     bx
-    ret
+    retf
 
 theme_get_col_accent:
     push    bx
     call    theme_ptr
     mov     al, [bx + 5]
     pop     bx
-    ret
+    retf
 
 theme_get_col_dim:
     push    bx
     call    theme_ptr
     mov     al, [bx + 6]
     pop     bx
-    ret
+    retf
 
 theme_get_col_selected:
     push    bx
     call    theme_ptr
     mov     al, [bx + 7]
     pop     bx
-    ret
+    retf
 
 theme_get_col_title:
     push    bx
     call    theme_ptr
     mov     al, [bx + 8]
     pop     bx
-    ret
+    retf
 
 theme_get_col_status:
     push    bx
     call    theme_ptr
     mov     al, [bx + 9]
     pop     bx
-    ret
+    retf
 
 theme_ptr:
     push    ax
@@ -162,13 +179,13 @@ theme_get_name:
     pop     cx
     pop     bx
     pop     ax
-    ret
+    retf
 .default:
     mov     si, theme_names
     pop     cx
     pop     bx
     pop     ax
-    ret
+    retf
 
 theme_list_entry:
     push    ax
@@ -186,13 +203,25 @@ theme_list_entry:
     pop     cx
     pop     bx
     pop     ax
-    ret
+    retf
 .bad:
     stc
     pop     cx
     pop     bx
     pop     ax
-    ret
+    retf
+
+theme_copy_colors:
+    push    si
+    push    di
+    push    cx
+    mov     si, active_colors
+    mov     cx, 10
+    rep     movsb
+    pop     cx
+    pop     di
+    pop     si
+    retf
 
 active_theme    db THEME_COLOR
 active_colors   times 10 db 0
@@ -211,4 +240,4 @@ theme_names:
     db "RETRO       ", 0
     db "STEALTH     ", 0
 
-times 1024 - ($ - $$) db 0
+times 1024 - ($ - $$) db
