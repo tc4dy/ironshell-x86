@@ -103,90 +103,31 @@ theme_init_defaults:
     ret
 
 theme_apply_color:
-    push    ax
-    cmp     al, 1
-    je      .color
-    cmp     al, 2
-    je      .mono
-    cmp     al, 3
-    je      .hacker
-    cmp     al, 4
-    je      .retro
-    cmp     al, 5
-    je      .stealth
-    pop     ax
-    stc
-    ret
-
-.color:
-    mov     byte [th_normal],   0x07
-    mov     byte [th_bright],   0x0F
-    mov     byte [th_success],  0x0A
-    mov     byte [th_error],    0x0C
-    mov     byte [th_warn],     0x0E
-    mov     byte [th_accent],   0x0B
-    mov     byte [th_dim],      0x08
-    mov     byte [th_selected], 0x2F
-    mov     byte [th_title],    0x4F
-    mov     byte [th_status],   0x30
-    jmp     .done
-
-.mono:
-    mov     byte [th_normal],   0x07
-    mov     byte [th_bright],   0x0F
-    mov     byte [th_success],  0x07
-    mov     byte [th_error],    0x0F
-    mov     byte [th_warn],     0x07
-    mov     byte [th_accent],   0x0F
-    mov     byte [th_dim],      0x08
-    mov     byte [th_selected], 0x70
-    mov     byte [th_title],    0x70
-    mov     byte [th_status],   0x07
-    jmp     .done
-
-.hacker:
-    mov     byte [th_normal],   0x02
-    mov     byte [th_bright],   0x0A
-    mov     byte [th_success],  0x0A
-    mov     byte [th_error],    0x0C
-    mov     byte [th_warn],     0x02
-    mov     byte [th_accent],   0x0A
-    mov     byte [th_dim],      0x08
-    mov     byte [th_selected], 0x20
-    mov     byte [th_title],    0x0A
-    mov     byte [th_status],   0x02
-    jmp     .done
-
-.retro:
-    mov     byte [th_normal],   0x06
-    mov     byte [th_bright],   0x0E
-    mov     byte [th_success],  0x0E
-    mov     byte [th_error],    0x0C
-    mov     byte [th_warn],     0x06
-    mov     byte [th_accent],   0x0E
-    mov     byte [th_dim],      0x08
-    mov     byte [th_selected], 0x60
-    mov     byte [th_title],    0x6F
-    mov     byte [th_status],   0x60
-    jmp     .done
-
-.stealth:
-    mov     byte [th_normal],   0x08
-    mov     byte [th_bright],   0x07
-    mov     byte [th_success],  0x07
-    mov     byte [th_error],    0x08
-    mov     byte [th_warn],     0x08
-    mov     byte [th_accent],   0x07
-    mov     byte [th_dim],      0x00
-    mov     byte [th_selected], 0x07
-    mov     byte [th_title],    0x07
-    mov     byte [th_status],   0x08
-    jmp     .done
-
-.done:
-    pop     ax
+    pusha
+    push    ds
+    push    es
+    xor     dx, dx
+    mov     ds, dx
+    mov     es, dx
+    call    far [.theme_set_ptr]
+    jc      .bad
+    mov     di, th_normal
+    call    far [.copy_colors_ptr]
+    pop     es
+    pop     ds
+    popa
     clc
     ret
+.bad:
+    pop     es
+    pop     ds
+    popa
+    stc
+    ret
+.theme_set_ptr:
+    dw  THEME_BASE + 0, 0x0000
+.copy_colors_ptr:
+    dw  THEME_BASE + 42, 0x0000
 
 init_payloads:
     push    es
@@ -212,8 +153,6 @@ init_payloads:
     mov     word [hist_cursor], 0
     mov     word [partial_col], 0
     mov     word [last_error], ERR_NONE
-    mov     byte [active_filter], 0x00
-    mov     byte [active_theme_id], 0x01
 
     mov     si, str_pl_msgbox
     mov     di, payload_names + 0 * PAYLOAD_NAME_LEN
@@ -718,9 +657,7 @@ cmd_run_payload:
     xor     ch, ch
     push    cx
     push    ax
-    ; call    sandbox_pre
-    nop
-    nop
+    call    sandbox_pre
     jc      .exec_blocked
 
     pop     ax
@@ -772,23 +709,21 @@ cmd_run_payload:
 sandbox_pre:
     push    bp
     mov     bp, sp
-    mov     ax, [bp+6]      
+    mov     ax, [bp+6]
     push    ax
-    mov     ax, [bp+4]  
+    mov     ax, [bp+4]
     push    ax
     call    far [.sandbox_ptr]
     pop     bp
     ret
 .sandbox_ptr:
-    dw SANDBOX_ENTRY, 0x0000
-
-SANDBOX_POST    equ 0x902E      
+    dw  SANDBOX_ENTRY, 0x0000
 
 sandbox_post:
-    call    far [.sandbox_ptr]
+    call    far [.api_ptr]
     ret
-.sandbox_ptr:
-    dw SANDBOX_POST, 0x0000
+.api_ptr:
+    dw  SANDBOX_ENTRY + 3, 0x0000
 
 exec_payload:
     cmp     ax, 0
@@ -820,10 +755,9 @@ payload_msgbox:
     mov     bl, [th_success]
     call    log_colored
 
-    mov     word [es:SHELLCODE_BASE + 0], 0xB8C0
-    mov     word [es:SHELLCODE_BASE + 2], 0x07C0
-    mov     word [es:SHELLCODE_BASE + 4], 0x90C3
-
+    mov     word [es:SHELLCODE_BASE + 0], 0xC0B8
+    mov     word [es:SHELLCODE_BASE + 2], 0xC307
+    mov     word [es:SHELLCODE_BASE + 4], 0x9090  
     mov     si, str_injected
     mov     bl, [th_accent]
     call    log_colored
@@ -1382,7 +1316,6 @@ cmd_set_theme:
     je      .bad
     cmp     ax, 5
     ja      .bad
-    mov     [active_theme_id], al
     call    theme_apply_color
     jc      .bad
     call    ui_full_redraw
@@ -1407,7 +1340,8 @@ cmd_set_filter:
     jc      .bad
     cmp     ax, 5
     ja      .bad
-    mov     [active_filter], al
+    call    far [.set_ptr]
+    jc      .bad
     call    ui_redraw_log
     mov     si, str_filter_ok
     mov     bl, [th_accent]
@@ -1420,6 +1354,8 @@ cmd_set_filter:
     call    log_error_msg
     popa
     ret
+.set_ptr:
+    dw  FILTER_BASE + 0, 0x0000
 
 cmd_list_themes:
     pusha
@@ -1688,49 +1624,10 @@ filter_check:
     ret
 
 filter_color_match:
-    push    bx
-    mov     bl, [active_filter]
-    cmp     bl, 0
-    je      .pass
-    cmp     bl, 1
-    jne     .chk2
-    cmp     al, COL_DIM
-    je      .pass
-    cmp     al, COL_ACCENT
-    je      .pass
-    jmp     .fail
-.chk2:
-    cmp     bl, 2
-    jne     .chk3
-    cmp     al, COL_WARN
-    je      .pass
-    jmp     .fail
-.chk3:
-    cmp     bl, 3
-    jne     .chk4
-    cmp     al, COL_ERROR
-    je      .pass
-    jmp     .fail
-.chk4:
-    cmp     bl, 4
-    jne     .chk5
-    cmp     al, COL_SUCCESS
-    je      .pass
-    jmp     .fail
-.chk5:
-    cmp     bl, 5
-    jne     .fail
-    cmp     al, COL_ACCENT
-    je      .pass
-    jmp     .fail
-.pass:
-    clc
-    pop     bx
+    call    far [.api_ptr]
     ret
-.fail:
-    stc
-    pop     bx
-    ret
+.api_ptr:
+    dw  FILTER_BASE + 6, 0x0000
 
 cmd_show_info:
     pusha
@@ -2102,13 +1999,11 @@ ui_redraw_payload_list:
 
     cmp     cx, [selected_idx]
     jne     .normal
-
+    
     mov     ah, [th_selected]
     mov     al, 0x20
     stosw
     stosw
-    sub     di, 4
-    add     di, 4
     mov     ah, [th_selected]
     jmp     .print
 
@@ -2815,8 +2710,6 @@ vga_puts:
 engine_drive        db 0
 nx_active           db 0
 smep_active         db 0
-active_theme_id     db 0x01
-active_filter       db 0x00
 cpuid_edx           dd 0
 cpuid_ecx           dd 0
 conv_mem_kb         dw 0
@@ -2894,7 +2787,7 @@ str_err_unknown     db "[ERR] Unknown command. Type 'help' for usage.", 0
 str_list_hdr        db "[PAYLOADS] Available shellcode modules:", 0
 str_info_hdr        db "[INFO] SX-SANDBOX System Information", 0
 str_info_1          db "  Engine  : 16-bit real mode shellcode loader/sandbox", 0
-str_info_2          db "  Stage2  : 0x7E00  (this module, 12 sectors)", 0
+str_info_2          db "  Stage2  : 0x7E00  (this module, 64 sectors)", 0
 str_info_3          db "  Sandbox : 0x9000  (protection layer, 8 sectors)", 0
 str_info_4          db "  Payload : 0xA000  (runtime injection target)", 0
 str_info_5          db "  Theme   : 0xB000  (theme engine, 2 sectors)", 0
