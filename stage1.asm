@@ -17,17 +17,17 @@ start:
     mov si, msg
     call print
 
-    mov ax, 0x0000
-    mov es, ax
-    mov bx, 0x7E00
-    mov ah, 0x02
-    mov al, 2
-    mov ch, 0
-    mov cl, 2
-    mov dh, 0
-    mov dl, 0x80
-    int 0x13
-    jc error
+    mov     ax, 0x0000
+    mov     es, ax
+    mov     bx, 0x7E00
+    mov     ah, 0x02
+    mov     al, 4
+    mov     ch, 0
+    mov     cl, 2
+    mov     dh, 0
+    mov     dl, 0x80
+    int     0x13
+    jc      error
 
     jmp 0x0000:0x7E00
 
