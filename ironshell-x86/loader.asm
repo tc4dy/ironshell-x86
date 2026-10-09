@@ -111,22 +111,17 @@ boot_entry:
     mov     es, ax
     jmp     STAGE2_SEG:STAGE2_OFF
 
-; disk_load: LBA extended read (INT 13h AH=42h)
-; IN: ax=segment, bx=offset, cx=sector_count, dx=start_lba
-; OUT: CF set on error
 disk_load:
     push    bp
     mov     bp, sp
     sub     sp, 8
 
-    mov     [bp-2], ax      ; segment
-    mov     [bp-4], bx      ; offset
-    mov     [bp-6], cx      ; count
-    mov     [bp-8], dx      ; current LBA
+    mov     [bp-2], ax
+    mov     [bp-4], bx
+    mov     [bp-6], cx
+    mov     [bp-8], dx
 
 .next_sector:
-    ; DAP (Disk Address Packet) - 16 bytes on stack
-    ; We'll use a fixed DAP buffer in memory instead
     mov     ax, [bp-8]
     mov     [dap_lba_low], ax
     mov     ax, [bp-2]
@@ -140,7 +135,6 @@ disk_load:
     int     0x13
     jc      .fail
 
-    ; advance buffer by 512
     mov     ax, [bp-4]
     add     ax, 512
     mov     [bp-4], ax
@@ -165,16 +159,15 @@ disk_load:
     stc
     ret
 
-; DAP - Disk Address Packet (fixed buffer)
 dap:
-dap_size    db  0x10        ; DAP size = 16
-dap_res     db  0x00        ; reserved
-dap_count   dw  0x0001      ; read 1 sector at a time
-dap_off     dw  0x0000      ; buffer offset
-dap_seg     dw  0x0000      ; buffer segment
-dap_lba_low dw  0x0000      ; LBA bits 0-15
-dap_lba_mid dw  0x0000      ; LBA bits 16-31
-dap_lba_hi  dd  0x00000000  ; LBA bits 32-63
+dap_size    db  0x10
+dap_res     db  0x00
+dap_count   dw  0x0001
+dap_off     dw  0x0000
+dap_seg     dw  0x0000
+dap_lba_low dw  0x0000
+dap_lba_mid dw  0x0000
+dap_lba_hi  dd  0x00000000
 
 vga_clear:
     pusha
