@@ -2787,8 +2787,8 @@ str_err_unknown     db "[ERR] Unknown command. Type 'help' for usage.", 0
 str_list_hdr        db "[PAYLOADS] Available shellcode modules:", 0
 str_info_hdr        db "[INFO] SX-SANDBOX System Information", 0
 str_info_1          db "  Engine  : 16-bit real mode shellcode loader/sandbox", 0
-str_info_2          db "  Stage2  : 0x7E00  (this module, 64 sectors)", 0
-str_info_3          db "  Sandbox : 0x9000  (protection layer, 8 sectors)", 0
+str_info_2          db "  Stage2  : 0x8000  (this module, 64 sectors)", 0
+str_info_3          db "  Sandbox : 0x9000  (protection layer, 16 sectors)", 0
 str_info_4          db "  Payload : 0xA000  (runtime injection target)", 0
 str_info_5          db "  Theme   : 0xB000  (theme engine, 2 sectors)", 0
 str_info_6          db "  Filter  : 0xC000  (log filter, 2 sectors)", 0
