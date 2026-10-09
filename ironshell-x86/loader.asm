@@ -323,8 +323,8 @@ fatal_disk:
 boot_drive      db 0
 status_row      db 5
 
-str_banner      db "  SX-SANDBOX  |  SHELLCODE EXECUTION ENVIRONMENT  |  v2.1  |  x86 BARE-METAL", 0
-str_banner_sub  db "Loader v2.1  >>  Initializing subsystems...", 0
+str_banner      db "  SX-SANDBOX  |  SHELLCODE EXECUTION ENVIRONMENT  |  v2.1.6  |  x86 BARE-METAL", 0
+str_banner_sub  db "Loader v2.1.6  >>  Initializing subsystems...", 0
 str_progress    db "LOADING  [", 0
 
 msg_load_stage2  db "[*] Loading execution engine (stage2)...", 0
