@@ -227,6 +227,50 @@ The `errors` command shows the last typed error code and a plain-text descriptio
 
 ---
 
+## Quick Start (Automated)
+
+The fastest way to boot **ironshell-x86** is the automated setup script. It
+handles the full pipeline — cloning the repository, installing missing
+dependencies, building the disk image and launching QEMU — in a single command.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tc4dy/ironshell-x86/main/autosetup.sh -o autosetup.sh
+chmod +x autosetup.sh
+./autosetup.sh
+```
+
+The script performs the following steps:
+
+- Detects the host Linux distribution via `/etc/os-release`
+- Selects the correct package manager (`apt`, `pacman`, `dnf`, `zypper`, `xbps`, `apk` or `emerge`)
+- Installs missing `git`, `nasm`, `qemu-system-x86` and `make` packages
+- Clones the repository into a temporary workspace under `/tmp`
+- Enters the `ironshell-x86/` subdirectory and builds the disk image
+- Boots the image under `qemu-system-i386` in curses mode
+
+### Script Options
+
+| Flag | Description |
+|---|---|
+| `-k`, `--keep` | Preserve the temporary workspace on exit (useful for debugging) |
+| `-h`, `--help` | Show usage information |
+
+### Requirements
+
+- A Linux host with `sudo` or `doas` (unless already running as root)
+- A terminal that supports curses rendering
+- Network access to GitHub for the initial clone
+
+### Notes
+
+- The temporary workspace is created with `mktemp -d -t ironshell-XXXXXX`
+  and removed automatically on exit unless `-k` is passed.
+- If the cloned repository layout changes, the script falls back to locating
+  any `Makefile` within three directory levels of the clone root.
+- QEMU exits via `Ctrl+A` followed by `X` when running in curses mode.
+
+---
+
 ## [dbg] Debug with GDB
 
 ```bash
