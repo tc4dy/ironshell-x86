@@ -30,7 +30,7 @@
 ---
 
 ## Schematic of the Working and Execution Logic 
-![Scheme](/Photos/scheme.png)
+![Scheme](/Photos/update_scheme.png)
 
 ---
 
