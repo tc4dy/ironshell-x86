@@ -303,13 +303,24 @@ Step through the MBR byte by byte, inspect registers, and trace the full boot se
 
 ```
 ironshell-x86/
-├── stage1.asm      MBR bootloader — loads loader from disk
-├── loader.asm      Loader module — loads stage2, sandbox, theme, filter
-├── stage2.asm      Execution engine, TUI shell, 8 payloads
-├── sandbox.asm     Protection layer v2.1 — policy engine, opcode scan, IVT diff+restore
-├── theme.asm       Theme engine — 5 themes, 10-slot color table, live redraw
-├── filter.asm      Log filter module — 6 filter modes, color-category matching
-└── Makefile        Build, run, debug, disasm targets with size validation
+├── stage1.asm MBR bootloader — loads loader from disk
+├── loader.asm Loader module — loads stage2, sandbox, theme, filter
+├── stage2.asm Execution engine, TUI shell, 8 payloads
+├── sandbox.asm Protection layer — policy engine, opcode scan, IVT diff+restore
+├── theme.asm Theme engine — 5 themes, 10-slot color table, live redraw
+├── filter.asm Log filter module — 6 filter modes, color-category matching
+└── Makefile Build, run, debug, disasm targets with size validation
+
+Photos/
+├── ironshell_x86_banner.svg Repository banner
+└── scheme.png Execution flow diagram
+
+Root/
+├── .gitignore
+├── autosetup.sh Automated clone + dependency install + build + boot script
+├── CHANGELOG.md Full version history
+├── LICENSE
+└── README.md
 ```
 
 ---
