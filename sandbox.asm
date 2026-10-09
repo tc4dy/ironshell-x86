@@ -23,6 +23,14 @@ REPORT_ENTRY_SIZE       equ 16
 LOG_MAX                 equ 64
 LOG_ENTRY_SIZE          equ 48
 
+sandbox_api:
+sandbox_api_entry:      jmp near sandbox_entry
+sandbox_api_post_exec:  jmp near sandbox_post_exec
+sandbox_api_set_policy: jmp near sandbox_set_policy
+sandbox_api_get_policy: jmp near sandbox_get_policy
+sandbox_api_get_report: jmp near sandbox_get_report
+sandbox_api_reset:      jmp near sandbox_reset
+
 sandbox_entry:
     push    bp
     mov     bp, sp
@@ -56,7 +64,7 @@ sandbox_entry:
     pop     ds
     popa
     pop     bp
-    ret     4
+    retf    4
 
 sandbox_post_exec:
     pusha
@@ -75,7 +83,7 @@ sandbox_post_exec:
     pop     es
     pop     ds
     popa
-    ret
+    retf
 
 sandbox_set_policy:
     cmp     al, POLICY_LOCKDOWN
@@ -84,19 +92,19 @@ sandbox_set_policy:
     mov     si, msg_policy_updated
     call    sb_log_info
     clc
-    ret
+    retf
 .reject:
     stc
-    ret
+    retf
 
 sandbox_get_policy:
     mov     al, [active_policy]
-    ret
+    retf
 
 sandbox_get_report:
     mov     bx, report_buf
     mov     cx, [report_count]
-    ret
+    retf
 
 sandbox_reset:
     pusha
@@ -108,7 +116,7 @@ sandbox_reset:
     mov     word [exec_count], 0
     mov     byte [policy_score], 100
     popa
-    ret
+    retf
 
 sb_pre_exec:
     pusha
