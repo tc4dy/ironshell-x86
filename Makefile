@@ -17,8 +17,8 @@ STAGE1_SECTOR   := 0
 LOADER_SECTOR   := 1
 STAGE2_SECTOR   := 3
 SANDBOX_SECTOR  := 67
-THEME_SECTOR    := 83
-FILTER_SECTOR   := 85
+THEME_SECTOR    := 87
+FILTER_SECTOR   := 89
 
 STAGE1_MAX_BYTES  := 512
 LOADER_MAX_BYTES  := 6144
@@ -131,15 +131,19 @@ debug: $(IMAGE)
 	@printf '        Then: break *0x7c00   continue\n'
 	$(QEMU) $(QEMU_DEBUG)
 
-disasm: $(STAGE1) $(LOADER) $(STAGE2) $(SANDBOX)
+disasm: $(STAGE1) $(LOADER) $(STAGE2) $(SANDBOX) $(THEME) $(FILTER)
 	@printf '\n=== STAGE1 (0x7C00) ===\n'
 	@$(NDISASM) -b 16 -o 0x7C00 $(STAGE1)
 	@printf '\n=== LOADER (0x7E00) ===\n'
 	@$(NDISASM) -b 16 -o 0x7E00 $(LOADER)
-	@printf '\n=== STAGE2 (0x9A00) ===\n'
-	@$(NDISASM) -b 16 -o 0x9A00 $(STAGE2)
+	@printf '\n=== STAGE2 (0x8000) ===\n'
+	@$(NDISASM) -b 16 -o 0x8000 $(STAGE2)
 	@printf '\n=== SANDBOX (0x9000) ===\n'
 	@$(NDISASM) -b 16 -o 0x9000 $(SANDBOX)
+	@printf '\n=== THEME (0xB000) ===\n'
+	@$(NDISASM) -b 16 -o 0xB000 $(THEME)
+	@printf '\n=== FILTER (0xC000) ===\n'
+	@$(NDISASM) -b 16 -o 0xC000 $(FILTER)
 
 check:
 	@command -v $(NASM)    >/dev/null 2>&1 || { printf '  [ERR] nasm not found\n';            exit 1; }
@@ -162,13 +166,13 @@ help:
 	@printf '  make disasm    Disassemble all binaries (ndisasm)\n'
 	@printf '  make clean     Remove build artifacts\n'
 	@printf '\n  Memory Layout:\n'
-	@printf '  0x7C00  stage1.asm    MBR (512 bytes, sector 0)\n'
-	@printf '  0x7E00  loader.asm    Loader (12 sectors, sector 2)\n'
-	@printf '  0x9A00  stage2.asm    Shell + engine (12 sectors, sector 14)\n'
-	@printf '  0x9000  sandbox.asm   Protection layer (8 sectors, sector 14)\n'
-	@printf '  0xA000  shellcode     Runtime injection target\n'
-	@printf '  0xB000  theme.asm     Theme engine (2 sectors, sector 26)\n'
-	@printf '  0xC000  filter.asm    Log filter (2 sectors, sector 28)\n'
+	@printf '  0x7C00  stage1.asm    MBR (1 sector, LBA 0)\n'
+	@printf '  0x7E00  loader.asm    Loader (12 sectors, LBA 1)\n'
+	@printf '  0x8000  stage2.asm    Shell + engine (64 sectors, LBA 3)\n'
+	@printf '  0x9000  sandbox.asm   Protection layer (16 sectors, LBA 67)\n'
+	@printf '  0xA000  shellcode     Runtime injection target (LBA 83)\n'
+	@printf '  0xB000  theme.asm     Theme engine (2 sectors, LBA 87)\n'
+	@printf '  0xC000  filter.asm    Log filter (2 sectors, LBA 89)\n'
 	@printf '\n  Shell Commands:\n'
 	@printf '  run              Execute selected payload\n'
 	@printf '  list             List payload modules\n'
