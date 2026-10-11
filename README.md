@@ -15,7 +15,7 @@
 
 ---
 
-## [>>] Features
+## [>>] Fe
 
 - [+] **2-Stage Bootloader** — Stage 1 MBR loads Stage 2 + Sandbox + Shellcode + Theme + Filter modules from disk with retry logic
 - [+] **TUI Shell** — Full interactive terminal UI with dual-panel VGA layout, command history (↑↓), page scroll (PgUp/PgDn), and live execution log
