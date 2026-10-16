@@ -9,7 +9,7 @@
 [![Mode](https://img.shields.io/badge/mode-Ring%200%20%2F%20Real%20Mode-critical)]()
 [![Sandbox](https://img.shields.io/badge/sandbox-4%20policy%20levels-orange)]()
 [![Payloads](https://img.shields.io/badge/payloads-8%20injectable%20modules-purple)]()
-[![Boot](https://img.shields.io/badge/boot-MBR%20%2B%202--Stage%20Loader-blueviolet)]()
+[![Boot](https://img.shields.io/badge/boot-MBR%20%2B%202--Stage%20Loader-green)]()
 
 ---
 
