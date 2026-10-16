@@ -5,7 +5,7 @@
 **ironshell-x86** is a bare-metal x86 shellcode execution and analysis environment written entirely in 16-bit Assembly. It runs directly from a bootable disk image — no OS, no runtime, no libc. Just raw silicon.
 
 [![Architecture](https://img.shields.io/badge/arch-x86%2016--bit-blue)]()
-[![Language](https://img.shields.io/badge/language-NASM%20Assembly-red)]()
+[![Language](https://img.shields.io/badge/language-NASM%20Assembly-yellow)]()
 [![Mode](https://img.shields.io/badge/mode-Ring%200%20%2F%20Real%20Mode-critical)]()
 [![Sandbox](https://img.shields.io/badge/sandbox-4%20policy%20levels-orange)]()
 [![Payloads](https://img.shields.io/badge/payloads-8%20injectable%20modules-purple)]()
