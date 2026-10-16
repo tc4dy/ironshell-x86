@@ -10,8 +10,6 @@
 [![Sandbox](https://img.shields.io/badge/sandbox-4%20policy%20levels-orange)]()
 [![Payloads](https://img.shields.io/badge/payloads-8%20injectable%20modules-purple)]()
 [![Boot](https://img.shields.io/badge/boot-MBR%20%2B%202--Stage%20Loader-blueviolet)]()
-[![Themes](https://img.shields.io/badge/themes-5%20color%20themes-brightgreen)]()
-[![Filters](https://img.shields.io/badge/log%20filters-6%20modes-yellow)]()
 
 ---
 
