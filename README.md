@@ -269,7 +269,7 @@ The script performs the following steps:
 
 ---
 
-## [dbg] Debug with GDB
+## [dbg] Debug with -GDB
 
 ```bash
 make debug
