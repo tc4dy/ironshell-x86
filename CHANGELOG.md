@@ -1,136 +1,103 @@
-# Changelog
+# changelog
 
-All notable changes to **ironshell-x86** are documented in this file.
-
----
-
-## [2.1.7] - Current
-
-This cycle focused on a complete architectural refactor to resolve structural memory overlaps, harden the sandbox execution envelope, and stabilize the boot sequence. The monolithic source files were split into a layered, modular directory structure to enforce separation of concerns and improve maintainability.
-
-### Added
-
-- **Modular directory structure**: Source files are now organized into `boot/`, `config/`, `core/`, `lib/`, and `ui/`. This replaces the previous flat layout where all logic was contained within a few massive files.
-- **Centralized configuration**: Added `config/memory.asm`, `config/errors.asm`, and `config/policies.asm`. All memory addresses, load offsets, and error codes are now defined in one location, eliminating hardcoded magic numbers across the codebase.
-- **Serial debugging (`lib/serial.asm`)**: Implemented COM1 serial output routines. This allows printf-style debugging via QEMU's `-serial stdio` flag without requiring a GDB stub.
-- `lib/disk.asm` now handles disk operations with an explicit LBA Extended Read (`AH=42h`) Disk Address Packet (DAP) structure.
-- **LBA Extended Read**: Replaced the legacy CHS (`AH=02h`) boot sector read in `stage1.asm` with LBA. The new routine includes a 3-attempt retry loop and disk reset on failure.
-
-### Changed
-
-- **Memory Layout Relocation**: `stage2.asm` has been moved from `0x8000` to `0x10000` (Segment `0x1000`). This completely resolves the previous overlap where stage2's data buffers were colliding with `sandbox` (`0x9000`), `theme` (`0xB000`), and `filter` (`0xC000`).
-- **Sandbox Hardening**: 
-  - IVT snapshot and restore routines now wrap the write operations with `CLI` and `STI` to prevent race conditions from interrupts firing during table modification.
-  - Opcode scanning depth increased from 128 bytes to `SCAN_DEPTH_MAX` (512 bytes) to accommodate larger payloads.
-  - Privileged opcodes (`HLT`, `WRMSR`, `RDMSR`, `LGDT`) are now hard-blocked regardless of the active policy level.
-  - Register integrity checks now snapshot and verify `ES` and `SP` in addition to `DS` and `SS`.
-- **API Interfaces**: `theme.asm`, `filter.asm`, and `sandbox.asm` now expose their functions via stable `jmp near` API tables. Cross-segment calls use `call far` and `retf` to enforce strict boundary execution.
-- **Build System (`Makefile`)**: Rewritten to include strict byte-size validations for every module (e.g., `stage1.bin` must be exactly 512 bytes). Output now explicitly reports file sizes and sector counts, and aborts compilation if limits are exceeded.
-- **Bootstrap (`autosetup.sh`)**: Cleaned up the logic to directly locate the root `Makefile` and the `ironshell.img` output without relying on recursive `find` scans.
-
-### Removed
-
-- Removed the monolithic `stage2.asm` structure; TUI, payloads, and command routing logic are now split into `ui/` and `core/`.
-- Removed all hardcoded offset calls (e.g., `THEME_BASE + 42`, `FILTER_BASE + 6`). Modules are now accessed through their respective API jump tables.
-- Removed redundant dead code, orphaned inline color blocks, and obsolete shadow variables in the shell loop.
-
-### Fixed
-
-- Fixed a critical race condition in IVT auto-restore that could crash the system if a hardware interrupt occurred during the table rewrite.
-- Fixed stack corruption in `payload_memwalk` caused by an unbalanced `BX` increment.
-- Fixed history navigation bug in `ui/input.asm` where the pointer (`DI`) was miscalculated after a `scasb` operation, causing string corruption.
-- Fixed `stage1.asm` drive number handling by storing `DL` in a dedicated memory location (`BOOT_DRIVE_ADDR`) before any BIOS calls could clobber it.
-
-### Notes
-
-- The payload body still executes outside the sandbox envelope (the sandbox pre-scans and post-audits, but does not hardware-isolate the execution ring). Hardware-level execution bounding (e.g., VT-x or strict segment limits) remains out of scope for the MVP.
-- `stage2` has been padded to 32768 bytes. Any further additions to `core/stage2.asm` must be monitored via the Makefile size validation to prevent overlapping into the `sandbox` segment at `0x9000`.
+all notable changes to ironshell-x86 are documented in this file.
 
 ---
 
-## [2.1.6] - Previous
+## [2.1.7] - current
 
-This cycle focused on module integration, jump tables, disk layout correctness
-and cleanup across all subsystems. The goal was to make the previously
-disconnected modules actually talk to each other through a stable interface,
-and to remove dead code that had accumulated from earlier prototypes.
+this release was mostly about fixing structural issues and hardening the sandbox environment. the old code was getting too big in single files and memory blocks were overlapping. we split everything up to enforce strict boundaries between subsystems.
 
-### Added
+### added
 
-- **API jump tables** at the top of `filter.asm`, `theme.asm` and `sandbox.asm`.
-  Each entry is a fixed-size near JMP, so stage2 can call any exported function
-  by a stable offset without recomputing positions every time a module grows.
-- `theme_copy_colors` API in `theme.asm` — copies all 10 color slots in one call.
-- `filter_api_match` binding so `stage2`'s log filter actually queries the
-  filter module's own `active_filter` state instead of keeping a shadow copy.
-- `theme_api_set` binding so `cmd_set_theme` now applies themes through the
-  theme module and immediately redraws the full screen with the new palette.
-- `sandbox_api_entry` and `sandbox_api_post_exec` bindings so `sandbox_pre`
-  and `sandbox_post` route through the sandbox jump table.
-- Sender-side `push ds / pop es` fix in `payload_memmap` so E820 queries write
-  into the stage2 buffer instead of the IVT neighborhood.
-- `CHANGELOG.md` (this file) so README stays focused on the current version.
+- refactored the source code into dedicated directories: boot/, config/, core/, lib/, and ui/. this replaces the old flat layout and makes isolated testing much easier.
+- created config/memory.asm, config/errors.asm, and config/policies.asm to centralize memory addresses and error codes. this eliminates scattered hardcoded values across the codebase.
+- implemented a serial debug module in lib/serial.asm. it allows printf-style debugging via com1 using qemu's -serial stdio flag, which is helpful for tracing execution without attaching gdb.
+- added lba extended read support for disk operations inside lib/disk.asm.
+- rewrote the stage1.asm boot sector to use lba (ah=42h) instead of the legacy chs method. it now includes a 3-attempt retry loop and resets the disk controller on failure.
 
-### Changed
+### changed
 
-- All exported module functions in `filter.asm`, `theme.asm` and `sandbox.asm`
-  now return with `retf` because stage2 calls them via `call far [ptr]`.
-  Internal helpers remain near `ret`.
-- `sandbox_post` now resolves `sandbox_post_exec` at `SANDBOX_ENTRY + 3`
-  instead of the fragile hardcoded `0x902E`.
-- `stage1.asm` reads 4 sectors (2048 bytes) for the loader instead of 2,
-  giving the loader room to grow without a silent partial load.
-- `cmd_set_filter` writes into the filter module directly, so the filter
-  engine and the shell share one source of truth for the active filter.
-- `payload_msgbox` shellcode bytes were reordered to produce a valid
-  `mov ax, imm; ret` stub at 0xA000 instead of an accidental memory write.
-- README rewritten to match actual code behavior across every subsystem,
-  including corrected sector counts, load addresses and sandbox wording.
+- relocated stage2.asm from 0x8000 to 0x10000 (segment 0x1000). the previous address was overlapping directly with the sandbox (0x9000), theme (0xb000), and filter (0xc000) modules, causing data corruption.
+- hardened the sandbox significantly. the ivt snapshot and restore routines now wrap write operations in cli and sti. this prevents a hardware interrupt from crashing the system mid-rewrite.
+- increased the opcode scan depth from 128 to 512 bytes. strict hard-blocks were also added for hlt, wrmsr, rdmsr, and lgdt regardless of the active policy.
+- the register integrity check now verifies es and sp post-execution, in addition to ds and ss.
+- theme.asm, filter.asm, and sandbox.asm now expose their functions through stable jmp near api tables. cross-segment calls use call far and retf, which is cleaner than hardcoding specific offsets.
+- updated the makefile to validate binary sizes. for instance, stage1.bin must be exactly 512 bytes, or the build will abort. it also prints the sector counts for every generated module.
+- cleaned up autosetup.sh to locate the root makefile directly, removing the recursive find scans.
 
-### Removed
+### removed
 
-- Dead `theme_apply_color` inline color blocks (`.color`, `.mono`, `.hacker`,
-  `.retro`, `.stealth`, `.done`) that were orphaned after the theme engine
-  moved to a standalone module at 0xB000.
-- The hardcoded `SANDBOX_POST equ 0x902E` constant — replaced by an offset
-  from `SANDBOX_ENTRY` through the sandbox jump table.
-- Stage2's shadow `active_filter` and `active_theme_id` variables. Both
-  subsystems now keep their own state inside their own module segment.
-- The runtime shellcode disk load in `loader.asm`. Payloads write their own
-  stub into 0xA000 at execution time, so there was nothing to load.
-- Redundant `clc / jc` guard in `cmd_run_payload` — replaced with a real
-  `call sandbox_pre`, which is now reachable and functional.
+- removed the monolithic stage2.asm file. the tui logic now resides in ui/, and the payload logic is in core/.
+- removed hardcoded offset calls such as theme_base + 42. all module communication now goes through the api jump tables.
+- cleaned up dead code, orphaned color blocks, and obsolete shadow variables left over from previous iterations.
 
-### Fixed
+### fixed
 
-- `theme_apply_color` now saves and restores `DS` and `ES` around the far
-  calls into the theme module, so it can be called safely from any context.
-- `cmd_set_filter` no longer diverges from the filter module's state.
-- `sandbox_post` no longer risks jumping to the wrong offset when the
-  sandbox module's internal layout shifts.
-- `sandbox_entry` now returns with `retf 4`, matching the far call from
-  `sandbox_pre` and correctly cleaning up its two stack arguments.
-- `filter_match` and `filter_get_name` now preserve `BX` across calls.
-- `filter_get_name` clears `DX` before `mul` for cleanliness.
-- Loader LBA values in `Makefile` for theme and filter now match what
-  `loader.asm` actually reads (87 and 89, not 83 and 85).
-- `Makefile disasm` target now uses the correct stage2 origin (0x8000)
-  and includes theme and filter binaries.
-- `Makefile help` memory layout text now reflects the real module placement.
+- fixed a critical race condition in the ivt auto-restore routine. previously, a hardware interrupt firing during the table rewrite could lock up the system.
+- fixed stack corruption in payload_memwalk caused by an unbalanced bx increment.
+- fixed the command history bug in ui/input.asm. the di pointer was miscalculated after a scasb operation, corrupting strings when scrolling up or down.
+- fixed stage1.asm drive number handling by saving dl to a dedicated memory location before any bios call could clobber it.
 
-### Notes
+### notes
 
-- The sandbox pre-scans and post-audits every payload, but the payload body
-  itself still executes outside the sandbox envelope. Tightening that
-  boundary is scheduled for a later cycle.
-- The loader/stage2 memory window is tight. If the loader grows past 2048
-  bytes, both the stage1 read count and `LOADER_MAX_BYTES` need to change
-  together, and the stage2 origin may need to move.
+- the payload body still executes outside the sandbox envelope. the sandbox pre-scans and post-audits, but it does not provide hardware-level isolation (such as vt-x or strict segment limits). this remains out of scope for the mvp.
+- stage2 is padded to 32768 bytes. any additions to core/stage2.asm must be monitored via the makefile size output to prevent overlapping into the sandbox segment at 0x9000.
 
 ---
 
-## [1.0] - Initial release
+## [2.1.6] - previous
 
-- Two-stage bootloader.
-- Seven payloads.
-- Basic sandbox with four policy levels.
+this cycle focused on module integration, jump tables, disk layout correctness and cleanup across all subsystems. the goal was to make the previously disconnected modules actually talk to each other through a stable interface, and to remove dead code that had accumulated from earlier prototypes.
+
+### added
+
+- api jump tables at the top of filter.asm, theme.asm, and sandbox.asm. each entry is a fixed-size near jmp, so stage 2 can call any exported function by a stable offset without recalculating positions every time a module grows.
+- theme_copy_colors api in theme.asm, copies all 10 color slots in one call.
+- filter_api_match binding so stage 2's log filter queries the filter module's own active_filter state instead of keeping a shadow copy.
+- theme_api_set binding so cmd_set_theme applies themes through the theme module and immediately redraws the full screen with the new palette.
+- sandbox_api_entry and sandbox_api_post_exec bindings so sandbox_pre and sandbox_post route through the sandbox jump table.
+- sender-side push ds and pop es fix in payload_memmap so e820 queries write into the stage 2 buffer instead of the ivt neighborhood.
+- changelog.md (this file) so the readme stays focused on the current version.
+
+### changed
+
+- all exported module functions in filter.asm, theme.asm, and sandbox.asm now return with retf because stage 2 calls them via call far [ptr]. internal helpers remain near ret.
+- sandbox_post now resolves sandbox_post_exec at sandbox_entry + 3 instead of the fragile hardcoded 0x902e.
+- stage1.asm reads 4 sectors (2048 bytes) for the loader instead of 2, giving the loader room to grow without a silent partial load.
+- cmd_set_filter writes into the filter module directly, so the filter engine and the shell share one source of truth for the active filter.
+- payload_msgbox shellcode bytes were reordered to produce a valid mov ax, imm; ret stub at 0xa000 instead of an accidental memory write.
+- readme rewritten to match actual code behavior across every subsystem, including corrected sector counts, load addresses, and sandbox wording.
+
+### removed
+
+- dead theme_apply_color inline color blocks (.color, .mono, .hacker, .retro, .stealth, .done) that were orphaned after the theme engine moved to a standalone module at 0xb000.
+- the hardcoded sandbox_post equ 0x902e constant, replaced by an offset from sandbox_entry through the sandbox jump table.
+- stage 2's shadow active_filter and active_theme_id variables. both subsystems now keep their own state inside their own module segment.
+- the runtime shellcode disk load in loader.asm. payloads write their own stub into 0xa000 at execution time, so there was nothing to load.
+- redundant clc and jc guard in cmd_run_payload, replaced with a real call sandbox_pre, which is now reachable and functional.
+
+### fixed
+
+- theme_apply_color now saves and restores ds and es around the far calls into the theme module, so it can be called safely from any context.
+- cmd_set_filter no longer diverges from the filter module's state.
+- sandbox_post no longer risks jumping to the wrong offset when the sandbox module's internal layout shifts.
+- sandbox_entry now returns with retf 4, matching the far call from sandbox_pre and correctly cleaning up its two stack arguments.
+- filter_match and filter_get_name now preserve bx across calls.
+- filter_get_name clears dx before mul for cleanliness.
+- loader lba values in makefile for theme and filter now match what loader.asm actually reads (87 and 89, not 83 and 85).
+- makefile disasm target now uses the correct stage 2 origin (0x8000) and includes theme and filter binaries.
+- makefile help memory layout text now reflects the real module placement.
+
+### notes
+
+- the sandbox pre-scans and post-audits every payload, but the payload body itself still executes outside the sandbox envelope. tightening that boundary is scheduled for a later cycle.
+- the loader and stage 2 memory window is tight. if the loader grows past 2048 bytes, both the stage 1 read count and loader_max_bytes need to change together, and the stage 2 origin may need to move.
+
+---
+
+## [1.0] - initial release
+
+- two-stage bootloader.
+- seven payloads.
+- basic sandbox with four policy levels.
