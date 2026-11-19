@@ -1,4 +1,4 @@
-![Logo](/Photos/ironshell_x86_banner.svg)
+![Logo](/assets/ironshell_x86_banner.svg)
 
 # ironshell-x86 – Bare-Metal Shellcode Sandbox
 
@@ -28,7 +28,7 @@
 ---
 
 ## Schematic of the Working and Execution Logic 
-![Scheme](/Photos/scheme2.1.7.svg)
+![Scheme](/assets/scheme2.1.7.svg)
 
 ---
 
