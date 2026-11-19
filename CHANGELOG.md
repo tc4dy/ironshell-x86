@@ -4,7 +4,57 @@ All notable changes to **ironshell-x86** are documented in this file.
 
 ---
 
-## [2.1.6] - Current
+# Changelog
+
+All notable changes to **ironshell-x86** are documented in this file.
+
+---
+
+## [2.1.7] - Current
+
+This cycle focused on a complete architectural refactor to resolve structural memory overlaps, harden the sandbox execution envelope, and stabilize the boot sequence. The monolithic source files were split into a layered, modular directory structure to enforce separation of concerns and improve maintainability.
+
+### Added
+
+- **Modular directory structure**: Source files are now organized into `boot/`, `config/`, `core/`, `lib/`, and `ui/`. This replaces the previous flat layout where all logic was contained within a few massive files.
+- **Centralized configuration**: Added `config/memory.asm`, `config/errors.asm`, and `config/policies.asm`. All memory addresses, load offsets, and error codes are now defined in one location, eliminating hardcoded magic numbers across the codebase.
+- **Serial debugging (`lib/serial.asm`)**: Implemented COM1 serial output routines. This allows printf-style debugging via QEMU's `-serial stdio` flag without requiring a GDB stub.
+- `lib/disk.asm` now handles disk operations with an explicit LBA Extended Read (`AH=42h`) Disk Address Packet (DAP) structure.
+- **LBA Extended Read**: Replaced the legacy CHS (`AH=02h`) boot sector read in `stage1.asm` with LBA. The new routine includes a 3-attempt retry loop and disk reset on failure.
+
+### Changed
+
+- **Memory Layout Relocation**: `stage2.asm` has been moved from `0x8000` to `0x10000` (Segment `0x1000`). This completely resolves the previous overlap where stage2's data buffers were colliding with `sandbox` (`0x9000`), `theme` (`0xB000`), and `filter` (`0xC000`).
+- **Sandbox Hardening**: 
+  - IVT snapshot and restore routines now wrap the write operations with `CLI` and `STI` to prevent race conditions from interrupts firing during table modification.
+  - Opcode scanning depth increased from 128 bytes to `SCAN_DEPTH_MAX` (512 bytes) to accommodate larger payloads.
+  - Privileged opcodes (`HLT`, `WRMSR`, `RDMSR`, `LGDT`) are now hard-blocked regardless of the active policy level.
+  - Register integrity checks now snapshot and verify `ES` and `SP` in addition to `DS` and `SS`.
+- **API Interfaces**: `theme.asm`, `filter.asm`, and `sandbox.asm` now expose their functions via stable `jmp near` API tables. Cross-segment calls use `call far` and `retf` to enforce strict boundary execution.
+- **Build System (`Makefile`)**: Rewritten to include strict byte-size validations for every module (e.g., `stage1.bin` must be exactly 512 bytes). Output now explicitly reports file sizes and sector counts, and aborts compilation if limits are exceeded.
+- **Bootstrap (`autosetup.sh`)**: Cleaned up the logic to directly locate the root `Makefile` and the `ironshell.img` output without relying on recursive `find` scans.
+
+### Removed
+
+- Removed the monolithic `stage2.asm` structure; TUI, payloads, and command routing logic are now split into `ui/` and `core/`.
+- Removed all hardcoded offset calls (e.g., `THEME_BASE + 42`, `FILTER_BASE + 6`). Modules are now accessed through their respective API jump tables.
+- Removed redundant dead code, orphaned inline color blocks, and obsolete shadow variables in the shell loop.
+
+### Fixed
+
+- Fixed a critical race condition in IVT auto-restore that could crash the system if a hardware interrupt occurred during the table rewrite.
+- Fixed stack corruption in `payload_memwalk` caused by an unbalanced `BX` increment.
+- Fixed history navigation bug in `ui/input.asm` where the pointer (`DI`) was miscalculated after a `scasb` operation, causing string corruption.
+- Fixed `stage1.asm` drive number handling by storing `DL` in a dedicated memory location (`BOOT_DRIVE_ADDR`) before any BIOS calls could clobber it.
+
+### Notes
+
+- The payload body still executes outside the sandbox envelope (the sandbox pre-scans and post-audits, but does not hardware-isolate the execution ring). Hardware-level execution bounding (e.g., VT-x or strict segment limits) remains out of scope for the MVP.
+- `stage2` has been padded to 32768 bytes. Any further additions to `core/stage2.asm` must be monitored via the Makefile size validation to prevent overlapping into the `sandbox` segment at `0x9000`.
+
+---
+
+## [2.1.6] - Previous
 
 This cycle focused on module integration, jump tables, disk layout correctness
 and cleanup across all subsystems. The goal was to make the previously
