@@ -1,34 +1,37 @@
-![Logo](/assets/ironshell_x86_banner.svg)
+![Logo](/Photos/ironshell_x86_banner.svg)
 
 # ironshell-x86 – Bare-Metal Shellcode Sandbox
 
 **ironshell-x86** is a bare-metal x86 shellcode execution and analysis environment written entirely in 16-bit Assembly. It runs directly from a bootable disk image — no OS, no runtime, no libc. Just raw silicon.
 
-[![Architecture](https://img.shields.io/badge/arch-x86%2016--bit-blue)]()
-[![Language](https://img.shields.io/badge/language-NASM%20Assembly-yellow)]()
-[![Mode](https://img.shields.io/badge/mode-Ring%200%20%2F%20Real%20Mode-critical)]()
-[![Sandbox](https://img.shields.io/badge/sandbox-4%20policy%20levels-orange)]()
-[![Payloads](https://img.shields.io/badge/payloads-8%20injectable%20modules-purple)]()
-[![Boot](https://img.shields.io/badge/boot-MBR%20%2B%202--Stage%20Loader-green)]()
+[![Architecture](https://img.shields.io/badge/arch-x86%2016--bit-1b5e20?style=flat-square)](#)
+[![Language](https://img.shields.io/badge/language-NASM%20Assembly-2e7d32?style=flat-square)](#)
+[![Mode](https://img.shields.io/badge/mode-Ring%200%20%2F%20Real%20Mode-388e3c?style=flat-square)](#)
+[![Sandbox](https://img.shields.io/badge/sandbox-4%20policy%20levels-4caf50?style=flat-square)](#)
+[![Payloads](https://img.shields.io/badge/payloads-8%20injectable%20modules-00897b?style=flat-square)](#)
+[![Boot](https://img.shields.io/badge/boot-MBR%20%2B%202--Stage%20Loader-558b2f?style=flat-square)](#)
 
 ---
 
 ## [>>] Features
 
-- [+] **2-Stage Bootloader** — Stage 1 MBR loads Stage 2 + Sandbox + Shellcode + Theme + Filter modules from disk with retry logic
-- [+] **TUI Shell** — Full interactive terminal UI with dual-panel VGA layout, command history (↑↓), page scroll (PgUp/PgDn), and live execution log
-- [+] **8 Injectable Payloads** — MSGBOX, MEMWALK, PORTPROBE, STACKSMASH, NXPROBE, CPUINFO, IVTDUMP, MEMMAP
-- [+] **Sandbox v2.1** — 4 enforcement policies, pre-execution opcode scanning (STI/HLT/IO/PRIV), IVT snapshot diffing with auto-restore, register integrity checks, CPUID support detection
-- [+] **Theme Engine** — 5 color themes (COLOR, MONO, HACKER, RETRO, STEALTH) loaded as a separate module at 0xB000
-- [+] **Log Filter System** — 6 filter modes (ALL, INFO, WARN, ERROR, SUCCESS, ACCENT) loaded as a separate module at 0xC000
-- [+] **Hardware Analysis** — CPUID vendor/brand/feature detection, A20 gate test, E820 memory map, conventional memory sizing
-- [+] **Error Tracking** — Typed error codes with descriptions, per-session error history via `errors` command
-- [+] **Clean Build System** — NASM + QEMU Makefile with GDB debug stub, ndisasm disassembly, and hard binary size validation for all 5 modules
+- [+] **2-Stage Bootloader** — Stage 1 MBR loads the loader via LBA Extended Read (`AH=42h`) with a 3-attempt retry mechanism. Stage 2 loads the core engine, sandbox, theme, and filter modules from disk.
+- [+] **Modular Directory Structure** — Code is strictly separated into `boot/`, `config/`, `core/`, `lib/`, and `ui/` for maintainability and isolated testing.
+- [+] **TUI Shell** — Full interactive terminal UI with a dual-panel VGA layout, command history (↑↓), page scroll (PgUp/PgDn), and a live execution log.
+- [+] **8 Injectable Payloads** — MSGBOX, MEMWALK, PORTPROBE, STACKSMASH, NXPROBE, CPUINFO, IVTDUMP, MEMMAP.
+- [+] **Sandbox v2.1.7** — 4 enforcement policies, dynamic opcode scanning up to 512 bytes, `CLI`/`STI` protected IVT snapshot & auto-restore, and register integrity checks (SS, DS, ES, SP).
+- [+] **Theme Engine** — 5 color themes (COLOR, MONO, HACKER, RETRO, STEALTH) loaded as a standalone module at `0xB000`, accessed via a stable API jump table.
+- [+] **Log Filter System** — 6 filter modes (ALL, INFO, WARN, ERROR, SUCCESS, ACCENT) loaded as a standalone module at `0xC000`.
+- [+] **Hardware Analysis** — CPUID vendor/brand/feature detection, A20 gate test, E820 memory map, conventional memory sizing.
+- [+] **Serial Debugging** — Integrated COM1 output for printf-style debugging via QEMU's `-serial stdio` flag.
+- [+] **Error Tracking** — Typed error codes with descriptions, accessible via the `errors` command.
+- [+] **Clean Build System** — NASM + QEMU Makefile with GDB debug stub, ndisasm disassembly, and hard binary size validation for all 6 modules.
 
 ---
 
-## Schematic of the Working and Execution Logic 
-![Scheme](/assets/scheme2.1.7.svg)
+## Schematic of the Working and Execution Logic
+
+![Scheme](/Photos/update_scheme.png)
 
 ---
 
@@ -38,7 +41,7 @@
 
 ```bash
 git clone https://github.com/tc4dy/ironshell-x86.git
-cd ironshell-x86/ironshell-x86
+cd ironshell-x86
 ```
 
 ### 2. Install dependencies
@@ -65,7 +68,7 @@ make run-sdl      # Launch in QEMU (SDL window)
 make debug        # Launch with GDB stub on port :1234
 make disasm       # Disassemble all binaries via ndisasm
 make clean        # Remove all build artifacts
-make help         # Show full build reference
+make check        # Verify required tools are installed
 ```
 
 ---
@@ -129,12 +132,12 @@ Once booted in QEMU, the interactive shell accepts:
 | 4 | `RETRO` | Amber CRT display |
 | 5 | `STEALTH` | Near-invisible dark mode |
 
-```
+```text
 theme 3       # Switch to hacker green
 themes        # List all themes
 ```
 
-The theme engine loads as a standalone module at **0xB000**. All 10 UI color slots (normal, bright, success, error, warn, accent, dim, selected, title, status) are remapped on theme change and the entire screen is redrawn immediately.
+The theme engine loads as a standalone module at **0xB000**. All 10 UI color slots (normal, bright, success, error, warn, accent, dim, selected, title, status) are remapped on theme change, and the entire screen is redrawn immediately.
 
 ---
 
@@ -151,7 +154,7 @@ The theme engine loads as a standalone module at **0xB000**. All 10 UI color slo
 | 4 | `SUCCESS` | Success entries only |
 | 5 | `ACCENT` | Accent-colored entries only |
 
-```
+```text
 filter 3      # Show errors only
 filters       # List all filter modes
 ```
@@ -160,9 +163,9 @@ The filter engine loads as a standalone module at **0xC000**. Filtering is appli
 
 ---
 
-## [#] Sandbox v2.1
+## [#] Sandbox v2.1.7
 
-The sandbox module (`sandbox.asm`) loads at `0x9000` and enforces one of four active policies:
+The sandbox module (`core/sandbox.asm`) loads at `0x9000` and enforces one of four active policies:
 
 | Policy | Value | Behavior |
 |---|---|---|
@@ -171,37 +174,36 @@ The sandbox module (`sandbox.asm`) loads at `0x9000` and enforces one of four ac
 | `POLICY_AUDIT_ONLY` | `0x02` | All payloads execute; violations are logged only |
 | `POLICY_LOCKDOWN` | `0x03` | No execution permitted under any condition |
 
-Pre-execution analysis (v2.1) includes:
+Pre-execution analysis (v2.1.7) includes:
 
-- **CPUID detection** — verifies CPU supports CPUID before any feature query
-- **Opcode scanning** — detects `IN`/`OUT`, `CLI`, `STI`, `HLT`, `WBINVD`, `RDMSR`/`WRMSR` across 128 bytes of payload
-- **HLT blocking** — payloads containing `HLT (0xF4)` are hard-blocked regardless of policy (system freeze risk)
-- **Privileged prefix blocking** — `0x0F 0x01`, `0x0F 0x09`, `0x0F 0x30`, `0x0F 0x32` are blocked (LGDT/WBINVD/WRMSR/RDMSR)
-- **IVT snapshot + auto-restore** — all 256 IVT entries are snapshotted before execution; any vector modified by the payload is automatically restored after, and the modification is logged
-- **Register integrity** — verifies `SS` and `DS` segment state post-execution; violations increment the policy score penalty
-- **Bounds check** — confirms payload dispatch address is within `0xA000–0xAFFF`
-- **Policy scoring** — a 0–100 score tracks cumulative violation weight across the session
+- **CPUID detection** — verifies CPU supports CPUID before any feature query.
+- **Opcode scanning** — detects `IN`/`OUT`, `CLI`, `STI`, `HLT`, `WBINVD`, `RDMSR`/`WRMSR` across up to 512 bytes of payload.
+- **Hard blocks** — payloads containing `HLT` or privileged prefixes (`0x0F 0x01`, `0x0F 0x30`, `0x0F 0x32`) are blocked regardless of policy (system freeze risk).
+- **IVT snapshot + auto-restore** — all 256 IVT entries are snapshotted before execution. Vector modifications are auto-restored with `CLI`/`STI` interrupt protection to prevent race conditions.
+- **Register integrity** — verifies `SS`, `DS`, `ES`, and `SP` state post-execution; violations increment the policy score penalty.
+- **Bounds check** — confirms payload dispatch address is within `0xA000–0xAFFF`.
+- **Policy scoring** — a 0–100 score tracks cumulative violation weight across the session.
 
-Every payload is pre-scanned by `sandbox_entry` before dispatch and post-audited by `sandbox_post_exec` after return. Policy enforcement, opcode scanning and IVT diffing happen in the sandbox envelope; the payload body itself executes outside it.
+Every payload is pre-scanned by `sandbox_entry` before dispatch and post-audited by `sandbox_post_exec` after return.
 
 ---
 
 ## Memory Layout
 
-```
-0x0000 – 0x03FF Interrupt Vector Table (IVT)
-0x0400 – 0x04FF BIOS Data Area (BDA)
-0x7C00 – 0x7DFF stage1.asm MBR bootloader (512 bytes, 1 sector)
-0x7E00 – 0x85FF loader.asm Loader module (~2048 bytes, 4 sectors)
-0x8000 – 0xFFFF stage2.asm Execution engine + TUI shell (32768 bytes, 64 sectors)
-0x9000 – 0xAFFF sandbox.asm Protection & analysis layer (8192 bytes, 16 sectors)
-0xA000 – 0xAFFF [EXEC] Shellcode injection target
-0xB000 – 0xB3FF theme.asm Theme engine (1024 bytes, 2 sectors)
-0xC000 – 0xC3FF filter.asm Log filter module (1024 bytes, 2 sectors)
-0xB800 – 0xBFFF VGA Text Memory (80×25, mode 0x03)
+```text
+0x00000 – 0x003FF  Interrupt Vector Table (IVT)
+0x00400 – 0x004FF  BIOS Data Area (BDA)
+0x07C00 – 0x07DFF  boot/stage1.asm     MBR bootloader (512 bytes)
+0x07E00 – 0x085FF  boot/loader.asm     Loader module (2048 bytes)
+0x09000 – 0x0AFFF  core/sandbox.asm    Protection & analysis layer (8192 bytes)
+0x0A000 – 0x0AFFF  [EXEC]              Shellcode injection target
+0x0B000 – 0x0B3FF  lib/theme.asm       Theme engine (1024 bytes)
+0x0B800 – 0x0BFFF  VGA Text Memory     (80×25, mode 0x03)
+0x0C000 – 0x0C3FF  lib/filter.asm      Log filter module (1024 bytes)
+0x10000 – 0x17FFF  core/stage2.asm     Execution engine + TUI (32768 bytes)
 ```
 
-> **Note:** The theme module at 0xB000 and VGA text buffer at 0xB800 are in the same physical segment space. Module data is accessed as flat 16-bit offsets from DS=0x0000, so `0x0000:0xB000` (theme) and `0xB800:0x0000` (VGA segment) resolve to different physical addresses and do not overlap.
+> **Note:** `stage2.asm` is relocated to `0x10000` (Segment `0x1000`) to resolve memory overlaps with the sandbox and UI modules, leaving a clean 32KB workspace.
 
 ---
 
@@ -227,9 +229,7 @@ The `errors` command shows the last typed error code and a plain-text descriptio
 
 ## Quick Start (Automated)
 
-The fastest way to boot **ironshell-x86** is the automated setup script. It
-handles the full pipeline — cloning the repository, installing missing
-dependencies, building the disk image and launching QEMU — in a single command.
+The fastest way to boot **ironshell-x86** is the automated setup script:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tc4dy/ironshell-x86/main/autosetup.sh -o autosetup.sh
@@ -237,14 +237,7 @@ chmod +x autosetup.sh
 ./autosetup.sh
 ```
 
-The script performs the following steps:
-
-- Detects the host Linux distribution via `/etc/os-release`
-- Selects the correct package manager (`apt`, `pacman`, `dnf`, `zypper`, `xbps`, `apk` or `emerge`)
-- Installs missing `git`, `nasm`, `qemu-system-x86` and `make` packages
-- Clones the repository into a temporary workspace under `/tmp`
-- Enters the `ironshell-x86/` subdirectory and builds the disk image
-- Boots the image under `qemu-system-i386` in curses mode
+The script handles cloning, dependency installation, building, and launching QEMU in a single command.
 
 ### Script Options
 
@@ -253,23 +246,14 @@ The script performs the following steps:
 | `-k`, `--keep` | Preserve the temporary workspace on exit (useful for debugging) |
 | `-h`, `--help` | Show usage information |
 
-### Requirements
-
-- A Linux host with `sudo` or `doas` (unless already running as root)
-- A terminal that supports curses rendering
-- Network access to GitHub for the initial clone
-
 ### Notes
 
-- The temporary workspace is created with `mktemp -d -t ironshell-XXXXXX`
-  and removed automatically on exit unless `-k` is passed.
-- If the cloned repository layout changes, the script falls back to locating
-  any `Makefile` within three directory levels of the clone root.
+- The temporary workspace is created with `mktemp -d -t ironshell-XXXXXX` and removed automatically on exit unless `-k` is passed.
 - QEMU exits via `Ctrl+A` followed by `X` when running in curses mode.
 
 ---
 
-## [dbg] Debug with -GDB
+## [dbg] Debug with GDB
 
 ```bash
 make debug
@@ -285,7 +269,7 @@ gdb
 (gdb) continue
 ```
 
-Step through the MBR byte by byte, inspect registers, and trace the full boot sequence. Stage 2 entry is at `0x7E00`; sandbox entry is at `0x9000`.
+Step through the MBR byte by byte, inspect registers, and trace the full boot sequence. Stage 2 entry is at `0x10000`; sandbox entry is at `0x9000`.
 
 ---
 
@@ -299,25 +283,41 @@ Step through the MBR byte by byte, inspect registers, and trace the full boot se
 
 ## File Structure
 
-```
+```text
 ironshell-x86/
-├── stage1.asm MBR bootloader — loads loader from disk
-├── loader.asm Loader module — loads stage2, sandbox, theme, filter
-├── stage2.asm Execution engine, TUI shell, 8 payloads
-├── sandbox.asm Protection layer — policy engine, opcode scan, IVT diff+restore
-├── theme.asm Theme engine — 5 themes, 10-slot color table, live redraw
-├── filter.asm Log filter module — 6 filter modes, color-category matching
-└── Makefile Build, run, debug, disasm targets with size validation
-
-Photos/
-├── ironshell_x86_banner.svg Repository banner
-└── scheme.png Execution flow diagram
-
-Root/
+├── boot/
+│   ├── stage1.asm          # MBR bootloader
+│   └── loader.asm          # 2nd stage loader
+├── config/
+│   ├── errors.asm          # Error code definitions
+│   ├── memory.asm          # Memory map and load addresses
+│   └── policies.asm        # Sandbox policy constants
+├── core/
+│   ├── ivt.asm             # IVT snapshot/diff routines
+│   ├── payloads.asm        # 8 payload implementations
+│   ├── sandbox.asm         # Protection layer
+│   ├── stage2.asm          # Main execution engine
+│   └── sysinfo.asm         # CPUID, A20, E820 checks
+├── lib/
+│   ├── disk.asm            # LBA disk I/O wrapper
+│   ├── filter.asm          # Log filter engine
+│   ├── math.asm            # Hex/Decimal conversion
+│   ├── serial.asm          # COM1 serial output
+│   ├── string.asm          # String manipulation
+│   └── theme.asm           # Color theme engine
+├── ui/
+│   ├── input.asm           # Keyboard and history
+│   ├── log.asm             # Ring buffer log
+│   ├── menu.asm            # TUI frames and panels
+│   └── screen.asm          # VGA text mode routines
+├── Photos/
+│   ├── ironshell_x86_banner.svg
+│   └── update_scheme.png
 ├── .gitignore
-├── autosetup.sh Automated clone + dependency install + build + boot script
-├── CHANGELOG.md Full version history
+├── autosetup.sh
+├── CHANGELOG.md
 ├── LICENSE
+├── Makefile
 └── README.md
 ```
 
@@ -325,34 +325,28 @@ Root/
 
 ## Version History
 
-**v2.1.5** — current
+**v2.1.7** — current
 
-**New Features:**
+### Architectural Changes
 
-- Added `theme.asm` module (0xB000): 5 color themes, live screen redraw
-- Added `filter.asm` module (0xC000): 6 log filter modes, render-time filtering
-- Added `MEMMAP` payload (E820 memory map via INT 15h with INT 12h fallback)
-- Sandbox: IVT auto-restore, STI/HLT detection, CPUID guard, policy scoring
-- New commands: `theme`, `themes`, `filter`, `filters`, `errors`
-- Payload arguments: `sel <n> <arg>` passes runtime args to PORTPROBE, STACKSMASH, IVTDUMP
-- Error tracking: typed error codes with `errors` command
-- Log scroll: PgUp/PgDn navigation in the log panel
+- Relocated `stage2.asm` to `0x10000` to resolve critical memory overlaps with `sandbox`, `theme`, and `filter` modules.
+- Refactored monolithic source files into a modular directory structure (`boot/`, `core/`, `lib/`, `ui/`, `config/`).
+- Centralized all memory addresses and error codes into `config/*.asm`.
 
-**Fixes:**
+### Security & Stability
 
-- Fixed: `exec_payload` now pre-scans all payloads through `sandbox_entry` before dispatch
-- Fixed: `payload_memwalk` stack corruption (double BX increment)
-- Fixed: `sb_pre_exec` policy logic (`jge` → correct allow/block ordering)
-- Fixed: `hist_prev` scasb using wrong DI after movsb
-- Fixed: `format_payload_line` invalid NASM multi-operand `mov`
-- Fixed: E820 entry stride inconsistency (20 vs 24 bytes)
-- Fixed: stage2/sandbox memory overlap (stage2 padded to 32768, sandbox at 0x9000 — gap enforced by layout)
-- Fixed: `strcpy_bounded_name` double null write
-- Fixed: `vga_draw_banner` box-drawing character sequence
-- Fixed: loader sector layout and disk addressing
-- Fixed: ES segment corruption in `init_payloads`, `theme_init_defaults`, `ui_full_redraw`, `ui_draw_frame`
+- Added `CLI`/`STI` interrupt protection to IVT restore routine to fix a race condition.
+- Increased opcode scan depth to 512 bytes; added hard-blocks for privileged instructions.
+- Replaced legacy CHS disk reads with LBA Extended Read (`AH=42h`) and a 3-attempt retry loop.
+- Extended register integrity checks to include `ES` and `SP`.
 
-**v1.0** — initial release
+### Fixes
 
-- 2-stage bootloader, 7 payloads, basic sandbox with 4 policies
-- For the full changelog across all versions, see [CHANGELOG.md](CHANGELOG.md).
+- Fixed history navigation string corruption in `ui/input.asm` (`scasb` pointer miscalculation).
+- Fixed stack corruption in `payload_memwalk`.
+- Hardened `Makefile` with strict byte-size validation for every module.
+
+**v1.0** — Initial release
+
+- 2-stage bootloader, 7 payloads, basic sandbox with 4 policies.
+- For the full changelog across all versions, see [CHANGELOG.md](https://changelog.md/).
