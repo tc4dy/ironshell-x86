@@ -1,4 +1,4 @@
-![Logo](/Photos/ironshell_x86_banner.svg)
+![Logo](/assets/ironshell_x86_banner.svg)
 
 # ironshell-x86 – Bare-Metal Shellcode Sandbox
 
@@ -31,7 +31,7 @@
 
 ## Schematic of the Working and Execution Logic
 
-![Scheme](/Photos/update_scheme.png)
+![Scheme](/assets/scheme2.1.7.png)
 
 ---
 
@@ -329,22 +329,26 @@ ironshell-x86/
 
 ### Architectural Changes
 
-- Relocated `stage2.asm` to `0x10000` to resolve critical memory overlaps with `sandbox`, `theme`, and `filter` modules.
-- Refactored monolithic source files into a modular directory structure (`boot/`, `core/`, `lib/`, `ui/`, `config/`).
-- Centralized all memory addresses and error codes into `config/*.asm`.
+- Relocated `stage2.asm` to `0x10000` (Segment `0x1000`) to resolve critical memory overlaps with `sandbox`, `theme`, and `filter` modules.
+- Refactored monolithic source files into a modular directory structure (`boot/`, `core/`, `lib/`, `ui/`, `config/`). Each module has a single responsibility, improving maintainability and isolated testing.
+- Centralized all memory addresses, load offsets, and error codes into `config/*.asm`, eliminating hardcoded magic numbers across the codebase.
+- Implemented stable `jmp near` API jump tables for `theme.asm`, `filter.asm`, and `sandbox.asm`. Cross-segment calls use `call far` and `retf` to enforce strict boundary execution.
 
 ### Security & Stability
 
-- Added `CLI`/`STI` interrupt protection to IVT restore routine to fix a race condition.
-- Increased opcode scan depth to 512 bytes; added hard-blocks for privileged instructions.
-- Replaced legacy CHS disk reads with LBA Extended Read (`AH=42h`) and a 3-attempt retry loop.
-- Extended register integrity checks to include `ES` and `SP`.
+- **IVT Race Condition Fixed:** Added `CLI`/`STI` interrupt protection around the IVT auto-restore routine. This prevents system crashes if a hardware interrupt fires while the table is being rewritten.
+- **Opcode Scanner Hardened:** Increased scan depth from 128 to 512 bytes to catch larger payloads. Added strict hard-blocks for privileged instructions (`HLT`, `WRMSR`, `RDMSR`, `LGDT`, `WBINVD`) regardless of the active policy level.
+- **Boot Sequence Hardened:** Replaced legacy CHS disk reads (`AH=02h`) with LBA Extended Read (`AH=42h`). Integrated a 3-attempt retry loop and disk reset (`AH=00h`) on failure to ensure reliable loading on modern BIOS/UEFI systems.
+- **Register Integrity Expanded:** The sandbox now snapshots and verifies `ES` (Extra Segment) and `SP` (Stack Pointer) state post-execution, in addition to `DS` and `SS`. Any unauthorized modification increments the policy score penalty.
+- **Payload Bounds Enforced:** Strict runtime checks ensure the payload dispatch address is always within the `0xA000–0xAFFF` executable region.
+- **Serial Debugging Added:** Implemented COM1 routines (`lib/serial.asm`) to allow printf-style debugging via QEMU's `-serial stdio` flag, reducing reliance on GDB for simple traces.
 
 ### Fixes
 
-- Fixed history navigation string corruption in `ui/input.asm` (`scasb` pointer miscalculation).
-- Fixed stack corruption in `payload_memwalk`.
-- Hardened `Makefile` with strict byte-size validation for every module.
+- Fixed history navigation string corruption in `ui/input.asm` caused by `scasb` pointer miscalculation.
+- Fixed stack corruption in `payload_memwalk` caused by an unbalanced `BX` increment.
+- Fixed `stage1.asm` drive number handling by storing `DL` in a dedicated memory location (`BOOT_DRIVE_ADDR`) before any BIOS call could clobber it.
+- Hardened the `Makefile` with strict byte-size validation for every module (e.g., `stage1.bin` must be exactly 512 bytes), aborting compilation if limits are exceeded.
 
 **v1.0** — Initial release
 
