@@ -4,12 +4,12 @@
 
 **ironshell-x86** is a bare-metal x86 shellcode execution and analysis environment written entirely in 16-bit Assembly. It runs directly from a bootable disk image — no OS, no runtime, no libc. Just raw silicon.
 
-[![Architecture](https://img.shields.io/badge/arch-x86%2016--bit-1b5e20?style=flat-square)](#)
-[![Language](https://img.shields.io/badge/language-NASM%20Assembly-2e7d32?style=flat-square)](#)
-[![Mode](https://img.shields.io/badge/mode-Ring%200%20%2F%20Real%20Mode-388e3c?style=flat-square)](#)
-[![Sandbox](https://img.shields.io/badge/sandbox-4%20policy%20levels-4caf50?style=flat-square)](#)
-[![Payloads](https://img.shields.io/badge/payloads-8%20injectable%20modules-00897b?style=flat-square)](#)
-[![Boot](https://img.shields.io/badge/boot-MBR%20%2B%202--Stage%20Loader-558b2f?style=flat-square)](#)
+[![Architecture](https://img.shields.io/badge/arch-x86%2016--bit-556B2F?style=flat-square)](#)
+[![Language](https://img.shields.io/badge/language-NASM%20Assembly-7CFC00?style=flat-square)](#)
+[![Mode](https://img.shields.io/badge/mode-Ring%200%20%2F%20Real%20Mode-2E8B57?style=flat-square)](#)
+[![Sandbox](https://img.shields.io/badge/sandbox-4%20policy%20levels-ADFF2F?style=flat-square)](#)
+[![Payloads](https://img.shields.io/badge/payloads-8%20injectable%20modules-006400?style=flat-square)](#)
+[![Boot](https://img.shields.io/badge/boot-MBR%20%2B%202--Stage%20Loader-00FF7F?style=flat-square)](#)
 
 ---
 
