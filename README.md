@@ -31,7 +31,7 @@
 
 ## Schematic of the Working and Execution Logic
 
-![Scheme](/assets/scheme2.1.7.png)
+![Scheme](/assets/scheme2.1.7.svg)
 
 ---
 
