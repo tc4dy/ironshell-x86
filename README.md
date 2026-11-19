@@ -28,7 +28,7 @@
 ---
 
 ## Schematic of the Working and Execution Logic 
-![Scheme](/Photos/update_scheme.png)
+![Scheme](/Photos/scheme2.1.7.svg)
 
 ---
 
