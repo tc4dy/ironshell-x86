@@ -4,10 +4,10 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 
 readonly REPO_URL="https://github.com/tc4dy/ironshell-x86.git"
-readonly SUBDIR="ironshell-x86"
 readonly QEMU_BIN="qemu-system-i386"
 readonly NASM_BIN="nasm"
 readonly GIT_BIN="git"
+readonly IMAGE_NAME="ironshell.img"
 
 readonly C_RESET="\033[0m"
 readonly C_RED="\033[1;31m"
@@ -214,19 +214,12 @@ clone_repo() {
     log_ok "repository cloned"
 }
 
-enter_subdir() {
-    local target="${WORKDIR}/${SUBDIR}"
-    if [[ ! -d "${target}" ]]; then
-        log_warn "expected subdirectory '${SUBDIR}' not found; scanning"
-        local found
-        found="$(find "${WORKDIR}" -maxdepth 3 -type f -name 'Makefile' -print -quit || true)"
-        if [[ -z "${found}" ]]; then
-            die "no Makefile found in cloned repository"
-        fi
-        target="$(dirname "${found}")"
+enter_workdir() {
+    if [[ ! -d "${WORKDIR}" ]]; then
+        die "cloned directory not found: ${WORKDIR}"
     fi
-    cd "${target}" || die "cannot enter ${target}"
-    log_ok "entered build directory: ${target}"
+    cd "${WORKDIR}" || die "cannot enter ${WORKDIR}"
+    log_ok "entered build directory: ${WORKDIR}"
 }
 
 build_project() {
@@ -238,13 +231,11 @@ build_project() {
 }
 
 check_image() {
-    local img
-    img="$(find . -maxdepth 2 -type f -name '*.img' -print -quit || true)"
-    if [[ -z "${img}" ]]; then
-        die "no .img file produced by build"
+    if [[ ! -f "${IMAGE_NAME}" ]]; then
+        die "expected image not found: ${IMAGE_NAME}"
     fi
-    log_ok "disk image: ${img}"
-    printf '%s' "${img}"
+    log_ok "disk image: ${IMAGE_NAME}"
+    printf '%s' "${IMAGE_NAME}"
 }
 
 launch_qemu() {
@@ -289,7 +280,7 @@ parse_args() {
                 ;;
             -h|--help)
                 cat >&2 <<'EOF'
-usage: run.sh [-k|--keep] [-h|--help]
+usage: autosetup.sh [-k|--keep] [-h|--help]
 
   clones tc4dy/ironshell-x86, installs dependencies, builds the disk
   image and boots it under qemu-system-i386.
@@ -319,7 +310,7 @@ main() {
     ensure_dependencies "${pkgmgr}"
     make_workspace
     clone_repo
-    enter_subdir
+    enter_workdir
     build_project
     launch_qemu
 
