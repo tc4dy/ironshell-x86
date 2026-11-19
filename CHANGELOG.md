@@ -4,12 +4,6 @@ All notable changes to **ironshell-x86** are documented in this file.
 
 ---
 
-# Changelog
-
-All notable changes to **ironshell-x86** are documented in this file.
-
----
-
 ## [2.1.7] - Current
 
 This cycle focused on a complete architectural refactor to resolve structural memory overlaps, harden the sandbox execution envelope, and stabilize the boot sequence. The monolithic source files were split into a layered, modular directory structure to enforce separation of concerns and improve maintainability.
